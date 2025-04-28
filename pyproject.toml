@@ -1,0 +1,19 @@
+[project]
+name = 'perudo'
+requires-python = '>= 3.13'
+dynamic = ['version']
+
+[build-system]
+requires = ['setuptools>=68']
+build-backend = 'setuptools.build_meta'
+
+
+[tool.setuptools.packages.find]
+where = ["./src"]
+include = ["perudo"]
+
+[tool.setuptools.dynamic]
+version = {attr = "perudo.__version__"}
+
+[project.optional-dependencies]
+dev = ["pytest"]
