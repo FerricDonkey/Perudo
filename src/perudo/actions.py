@@ -1,0 +1,260 @@
+import abc
+import dataclasses
+import math
+import typing as ty
+
+from perudo import common
+
+@dataclasses.dataclass(frozen=True)
+class Action(common.BaseFrozen):
+    """
+    All player actions should subclass this
+    """
+    ACTION_NAME: ty.ClassVar[str]
+    _ACTION_NAME_TO_ACTION_TYPE_D: ty.ClassVar[dict[str, type[ty.Self]]] = {}
+
+    @abc.abstractmethod
+    def validate(
+        self,
+        previous: None | ty.Self,
+        is_single_die_round: bool,
+    ) -> 'Action':
+        """
+        Check if this action was valid in its context, return an InvalidAction
+        object if not and itself if so.
+
+        :param previous: Previous action taken
+        :param is_single_die_round: Whether this is a round started by a single die
+        :return: The action if it was valid, or an InvalidAction object if not
+        """
+        raise NotImplemented('Implement me bro.')
+
+    @classmethod
+    @abc.abstractmethod
+    def get_from_human(cls, fixed_face: int | None) -> ty.Self:
+        action_name = common.get_option_from_human(cls._ACTION_NAME_TO_ACTION_TYPE_D.keys())
+        return cls._ACTION_NAME_TO_ACTION_TYPE_D[action_name].get_from_human(fixed_face)
+
+
+    @classmethod
+    def register_action[T: type['Action']](cls, ToRegister: T) -> T:
+        if ToRegister.ACTION_NAME in cls._ACTION_NAME_TO_ACTION_TYPE_D:
+            raise TypeError(f'Registered Action with name {ToRegister.ACTION_NAME} multiple times')
+        cls._ACTION_NAME_TO_ACTION_TYPE_D[ToRegister.ACTION_NAME] = ToRegister
+        return ToRegister
+
+
+@dataclasses.dataclass(frozen=True)
+class EndAction(Action):
+    """
+    Actions that end a round should subclass this
+    """
+    @abc.abstractmethod
+    def get_losers[T](
+        self,
+        previous_action: Action,
+        all_dice: ty.Collection[int],
+        is_single_die_round: bool,
+        caller: T,
+        previous_player: T,
+        other_players: ty.Collection[T]
+    ) -> list[T]:
+        """
+        Return True if the player won, False if the player lost.
+
+        Logic of what happens on win/lose is currently in the Game class
+        rather than the action class, which I'm not super happy about
+
+        :param previous_action: Action prior to this action (eg the bid before a challenge)
+        :param all_dice: All the dice in play (just a list of faces or similar)
+        :param is_single_die_round: Whether this is a round started by a single die
+        :param caller: Who started this
+        :param previous_player: Who was the previous player
+        :param other_players: All players who aren't the caller
+        :return: True if dude who did it was successful, False if not
+        """
+        raise NotImplemented('Implement me bro.')
+
+    @classmethod
+    def get_from_human(cls, fixed_face:int) -> ty.Self:
+        return cls()
+
+    def validate(
+        self,
+        previous: None | ty.Self,
+        is_single_die_round: bool,
+    ) -> ty.Self:
+        return self
+
+
+@dataclasses.dataclass(frozen=True)
+class InvalidAction(EndAction):
+    """
+    Always Fails. Contains what the action that failed was
+
+    Do NOT register with the Action class - this should never be explicitly
+    specified
+    """
+    attempted_action: object
+    reason: str
+
+    def get_losers[T](
+        self,
+        previous_action: Action,
+        all_dice: ty.Collection[int],
+        is_single_die_round: bool,
+        caller: T,
+        previous_player: T,
+        other_players: ty.Collection[T],
+    ) -> list[T]:
+        return [caller]
+
+    @classmethod
+    def get_from_human(cls, fixed_face:int) -> ty.Self:
+        raise RuntimeError(f'{cls.__name__} should not call get_from_human')
+
+
+@Action.register_action
+@dataclasses.dataclass(frozen=True)
+class Bid(Action):
+    ACTION_NAME: ty.ClassVar[str] = 'Bid'
+    face: int
+    count: int
+
+    def validate(
+        self,
+        previous: None | Action,
+        is_single_die_round: bool,
+    ) -> Action:
+        # Handle always impossible
+        if not common.validate_face(self.face):
+            return InvalidAction(self, "Invalid Face")
+
+        if self.count <= 0:
+            return InvalidAction(self, "Non-positive Count")
+
+        # Handle first bid
+        if previous is None:
+            if (
+                self.face == 1
+                and not is_single_die_round
+            ):
+                return InvalidAction(self, "Invalid Starting Bid")
+            return self
+
+        if not isinstance(previous, Bid):
+            return InvalidAction(self, "Following non-bid (should be impossible)")
+
+        # Handle following other bids
+        assert isinstance(previous, Bid)
+        min_count = previous.min_next_count(self.face)
+        if self.count < min_count:
+            return InvalidAction(self, f"Count for face {self.face} must be at least {min_count} (because of {previous=})")
+
+        return self
+
+    def min_next_count(self, next_face: int) -> int:
+        assert common.validate_face(next_face)
+        assert common.validate_face(self.face)
+        if next_face == self.face:
+            return self.count + 1
+        if next_face > self.face and self.face != common.WILD_FACE_VAL:
+            return self.count  # + 1 # TODO This might be wrong, but it stops some infinite loops.
+        if next_face == common.WILD_FACE_VAL:
+            return math.ceil(self.count / 2)
+        if self.face == common.WILD_FACE_VAL:
+            return self.count * 2 + 1
+        return math.ceil(self.count / 2) * 2 + 1
+
+    @classmethod
+    def get_from_human(cls, fixed_face: int | None) -> ty.Self:
+        if fixed_face is None:
+            return cls(
+                face=common.get_face_from_human(),
+                count=common.get_count_from_human(),
+            )
+        return cls(
+            face=fixed_face,
+            count=common.get_count_from_human()
+        )
+
+
+@Action.register_action
+@dataclasses.dataclass(frozen=True)
+class Challenge(EndAction):
+    ACTION_NAME: ty.ClassVar[str] = 'Challenge'
+    def validate(
+        self,
+        previous: None | Action,
+        is_single_die_round: bool,
+    ) -> EndAction:
+        if previous is None:
+            return InvalidAction(self, f"Can't use {self.ACTION_NAME} as opening move")
+
+        return self
+
+    def get_losers[T](
+        self,
+        previous_action: Action,
+        all_dice: ty.Collection[int],
+        is_single_die_round: bool,
+        caller: T,
+        previous_player: T,
+        other_players: ty.Collection[T],
+    ) -> list[T]:
+        if not isinstance(previous_action, Bid):
+            print(
+                "WARNING: Challenge Action called check success when not "
+                "following a bid, this should not be possible"
+            )
+            return [caller]
+
+        if is_single_die_round:
+            num_existing = sum(face == previous_action.face for face in all_dice)
+        else:
+            num_existing = sum(
+                face == previous_action.face or face == common.WILD_FACE_VAL
+                for face in all_dice
+            )
+
+        if num_existing < previous_action.count:
+            return [previous_player]
+        return [caller]
+
+
+@Action.register_action
+@dataclasses.dataclass(frozen=True)
+class Exact(EndAction):
+    ACTION_NAME: ty.ClassVar[str] = 'Exact'
+
+    validate = Challenge.validate  # Use same method as Challenge uses for this
+
+    def get_losers[T](
+        self,
+        previous_action: Action,
+        all_dice: ty.Collection[int],
+        is_single_die_round: bool,
+        caller: T,
+        previous_player: T,
+        other_players: ty.Collection[T],
+    ) -> list[T]:
+        if not isinstance(previous_action, Bid):
+            print(
+                "WARNING: Challenge Action called check success when not "
+                "following a bid, this should not be possible"
+            )
+            return [caller]
+
+        if is_single_die_round:
+            num_existing = sum(face == previous_action.face for face in all_dice)
+        else:
+            num_existing = sum(
+                face == previous_action.face or face == common.WILD_FACE_VAL
+                for face in all_dice
+            )
+        #print(f"{num_existing=}, {previous_action.count=}, {all_dice=}")
+        if num_existing == previous_action.count:
+            #print("WIN")
+            return list(other_players)
+        #print("LOSE")
+        return [caller]

@@ -2,48 +2,51 @@
 Some tests, mostly ai generated because I'm lazy (but I did read them). A few
 modified or added.
 """
-from unittest import mock
 
 import pytest
 
-import perudo.perudogame as pg
+from perudo import actions
+from perudo import common
+from perudo import game as pg
+from perudo import players as pl
+
 
 @pytest.fixture
 def simple_bid():
-    return pg.Bid(face=2, count=2)
+    return actions.Bid(face=2, count=2)
 
 @pytest.fixture
 def simple_game():
-    players = [pg.RandomLegalPlayer(name=f"Bot-{i}") for i in range(2)]
+    players = [pl.RandomLegalPlayer(name=f"Bot-{i}") for i in range(2)]
     game = pg.PerudoGame.from_player_list(players)
     return game
 
 def test_bid_validation_first_move_valid(simple_bid):
     action = simple_bid.validate(previous=None, is_single_die_round=False)
-    assert isinstance(action, pg.Bid)
+    assert isinstance(action, actions.Bid)
 
 def test_bid_validation_invalid_face():
-    bid = pg.Bid(face=7, count=2)
+    bid = actions.Bid(face=7, count=2)
     result = bid.validate(previous=None, is_single_die_round=False)
-    assert isinstance(result, pg.InvalidAction)
+    assert isinstance(result, actions.InvalidAction)
 
 def test_bid_min_next_count():
-    bid = pg.Bid(face=3, count=3)
+    bid = actions.Bid(face=3, count=3)
     assert bid.min_next_count(3) == 4  # Same face -> count + 1
     assert bid.min_next_count(4) == 3  # Higher face -> same count
     assert bid.min_next_count(1) == 2  # Wild -> ceil(count/2)
     assert bid.min_next_count(2) == 5  # Lower -> wrap around ceil(count/2)*2 + 1
 
 def test_bid_min_next_count_wild_base():
-    bid = pg.Bid(face=pg.WILD_FACE_VAL, count=3)
-    assert bid.min_next_count(pg.WILD_FACE_VAL) == 4  # Same face -> count + 1
-    assert bid.min_next_count(pg.WILD_FACE_VAL + 1) == 7  # Higher face -> same count
-    assert bid.min_next_count(pg.WILD_FACE_VAL + 2) == 7  # Lower -> wrap around ceil(count/2)*2 + 1
+    bid = actions.Bid(face=common.WILD_FACE_VAL, count=3)
+    assert bid.min_next_count(common.WILD_FACE_VAL) == 4  # Same face -> count + 1
+    assert bid.min_next_count(common.WILD_FACE_VAL + 1) == 7  # Higher face -> same count
+    assert bid.min_next_count(common.WILD_FACE_VAL + 2) == 7  # Lower -> wrap around ceil(count/2)*2 + 1
 
 def test_challenge_success():
-    previous = pg.Bid(face=3, count=2)
+    previous = actions.Bid(face=3, count=2)
     dice = [3, 3, 2, 6]
-    challenge = pg.Challenge()
+    challenge = actions.Challenge()
     losers = challenge.get_losers(
         previous_action=previous,
         all_dice=dice,
@@ -55,9 +58,9 @@ def test_challenge_success():
     assert losers == [0]  # Caller loses because bid was valid
 
 def test_challenge_failure():
-    previous = pg.Bid(face=3, count=3)
+    previous = actions.Bid(face=3, count=3)
     dice = [3, 2, 2, 6]
-    challenge = pg.Challenge()
+    challenge = actions.Challenge()
     losers = challenge.get_losers(
         previous_action=previous,
         all_dice=dice,
@@ -69,9 +72,9 @@ def test_challenge_failure():
     assert losers == [1]  # Previous player loses because bid was invalid
 
 def test_exact_success_no_wild():
-    previous = pg.Bid(face=2, count=2)
+    previous = actions.Bid(face=2, count=2)
     dice = [3, 2, 2, 6]
-    exact = pg.Exact()
+    exact = actions.Exact()
     losers = exact.get_losers(
         previous_action=previous,
         all_dice=dice,
@@ -83,9 +86,9 @@ def test_exact_success_no_wild():
     assert losers == [1, 2, 3, 4]  # Previous player loses because bid was invalid
 
 def test_exact_success_with_wild():
-    previous = pg.Bid(face=2, count=2)
+    previous = actions.Bid(face=2, count=2)
     dice = [3, 2, 1, 6]
-    exact = pg.Exact()
+    exact = actions.Exact()
     losers = exact.get_losers(
         previous_action=previous,
         all_dice=dice,
@@ -97,9 +100,9 @@ def test_exact_success_with_wild():
     assert losers == [1, 2, 3, 4]  # Previous player loses because bid was invalid
 
 def test_exact_success_disabled_wild():
-    previous = pg.Bid(face=2, count=2)
+    previous = actions.Bid(face=2, count=2)
     dice = [1, 2, 2, 6]
-    exact = pg.Exact()
+    exact = actions.Exact()
     losers = exact.get_losers(
         previous_action=previous,
         all_dice=dice,
@@ -111,9 +114,9 @@ def test_exact_success_disabled_wild():
     assert losers == [1, 2, 3, 4]  # Previous player loses because bid was invalid
 
 def test_exact_failure_no_wild():
-    previous = pg.Bid(face=3, count=2)
+    previous = actions.Bid(face=3, count=2)
     dice = [3, 2, 2, 6]
-    exact = pg.Exact()
+    exact = actions.Exact()
     losers = exact.get_losers(
         previous_action=previous,
         all_dice=dice,
@@ -125,9 +128,9 @@ def test_exact_failure_no_wild():
     assert losers == [0]  # Previous player loses because bid was invalid
 
 def test_exact_failure_with_wild():
-    previous = pg.Bid(face=3, count=2)
+    previous = actions.Bid(face=3, count=2)
     dice = [3, 3, 1, 6]
-    exact = pg.Exact()
+    exact = actions.Exact()
     losers = exact.get_losers(
         previous_action=previous,
         all_dice=dice,
@@ -139,9 +142,9 @@ def test_exact_failure_with_wild():
     assert losers == [0]  # Previous player loses because bid was invalid
 
 def test_exact_failure_disabled_wild():
-    previous = pg.Bid(face=3, count=2)
+    previous = actions.Bid(face=3, count=2)
     dice = [3, 1, 2, 6]
-    exact = pg.Exact()
+    exact = actions.Exact()
     losers = exact.get_losers(
         previous_action=previous,
         all_dice=dice,
