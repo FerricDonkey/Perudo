@@ -67,6 +67,8 @@ class BaseFrozen:
     Represents a base frozen dataclass with type validation and utility methods for
     serialization and deserialization.
 
+    NOTE: Type hints must be types, not strs.
+
     This immutable dataclass validates the types of its attributes upon initialization.
     It provides methods to create an instance from a dictionary or a JSON string and
     to convert the instance into a dictionary or a JSON string.
@@ -84,14 +86,39 @@ class BaseFrozen:
             raise ConstructionError('- '+'\n- '.join(errors))
 
     @classmethod
-    def from_dict(cls, action_d: dict[str, ty.Any]) -> ty.Self:
+    def from_dict(cls, input_d: dict[str, ty.Any]) -> ty.Self:
         try:
-            return cls(**action_d)  # type: ignore (pycharm is stupid about this)
-        except:
-            raise ConstructionError(f"Can't construct {cls.__name__} from {action_d}")
+            # Handle nested BaseFrozen types
+            errors = []
+            kwargs = {}
+            field_name_to_type_d: dict[str, type] = {field.name: field.type for field in dataclasses.fields(cls)}
+            for field_name, value in input_d.items():
+                if field_name not in field_name_to_type_d:
+                    errors.append(f"Invalid field {field_name} in input_d to {cls.__name__}")
+                    continue
+                FieldType = field_name_to_type_d[field_name]
+
+                if issubclass(FieldType, BaseFrozen):
+                    kwargs[field_name] = FieldType.from_dict(value)
+                elif not isinstance(value, FieldType):
+                    errors.append(
+                        f"Field {field_name} in input_d to {cls.__name__} expected "
+                        f"type {FieldType}, but got object {value} of type {type(value)}."
+                    )
+                else:
+                    kwargs[field_name] = value
+            if errors:
+                raise ConstructionError(
+                    f"Could not construct {cls.__name__} from specified input:\n    - "
+                    + "\n    - ".join(errors)
+                )
+            return cls(**kwargs)  # type: ignore[call-arg] pycharm's type checker is wrong here
+
+        except Exception as exc:
+            raise ConstructionError(f"Can't construct {cls.__name__} from {input_d}") from exc
 
     @classmethod
-    def from_json(cls, json_str: str) -> ty.Self:
+    def from_json(cls, json_str: str | bytes) -> ty.Self:
         try:
             return cls.from_dict(json.loads(json_str))
         except:

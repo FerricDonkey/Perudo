@@ -7,13 +7,17 @@ dynamic = ['version']
 requires = ['setuptools>=68']
 build-backend = 'setuptools.build_meta'
 
-
 [tool.setuptools.packages.find]
 where = ["./src"]
 include = ["perudo"]
 
 [tool.setuptools.dynamic]
 version = {attr = "perudo.__version__"}
+
+[project]
+dependencies = [
+    "cryptography",
+]
 
 [project.optional-dependencies]
 dev = ["pytest"]
