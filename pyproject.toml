@@ -20,4 +20,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = [
+    "mypy",
+    "pytest",
+    "pyright",
+]

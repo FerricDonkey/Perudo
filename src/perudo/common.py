@@ -15,8 +15,10 @@ assert NUM_FACES > 1, "Can't have only one face"
 assert MIN_FACE_VAL <= WILD_FACE_VAL <= MAX_FACE_VAL, "Wild card must be in range"
 assert WILD_FACE_VAL == MIN_FACE_VAL, "Wild card must be first"  # TODO fix bid looping logic so this isn't necessary
 
+
 def validate_face(face: int) -> bool:
     return MIN_FACE_VAL <= face <= MAX_FACE_VAL
+
 
 class ConstructionError(Exception):
     """

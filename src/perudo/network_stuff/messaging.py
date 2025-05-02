@@ -16,15 +16,19 @@ from perudo import common
 from perudo import actions
 
 @dataclasses.dataclass(frozen=True)
-class Message:
+class WrappedMessage:
     """
     Message format. Actual contents are contained in the data field, and must
     also be a common.BaseFrozen object.
 
+    This class probably won't be used directly, outside of the handshake
+    in network_common. Most code should use Connection.send_obj and receive_obj
+    from that module to send and receive BaseFrozen objects directly
+
     RECEIVED_SALTS and SENT_SALTS are used to prevent replay attacks.
     """
     SALT_LEN: ty.ClassVar[int] = 32
-    TYPE_NAME_TO_TYPE_D: ty.ClassVar[dict[str, type[ty.Self]]] = {}
+    TYPE_NAME_TO_TYPE_D: ty.ClassVar[dict[str, type[common.BaseFrozen]]] = {}
     RECEIVED_SALTS: ty.ClassVar[collections.defaultdict[bytes, set[bytes]]] = collections.defaultdict(set)
     SENT_SALTS: ty.ClassVar[set[bytes]] = set()
     VERSION: ty.ClassVar[str] = "0.1"
@@ -59,7 +63,7 @@ class Message:
         )
 
     @classmethod
-    def from_network(cls, json_str: str | bytes,) -> ty.Self:
+    def from_bytes(cls, json_str: str | bytes, ) -> ty.Self:
         """
         Also verifies the signature.
         """
@@ -68,7 +72,7 @@ class Message:
             public_key_bytes = binascii.unhexlify(as_dict['public_key'])
             salt = binascii.unhexlify(as_dict['salt'])
             if salt in cls.RECEIVED_SALTS[public_key_bytes]:
-                raise common.ConstructionError(f"Received duplicate salt: {salt}")
+                raise common.ConstructionError(f"Received duplicate salt: {salt!r}")
 
             public_key = ed25519.Ed25519PublicKey.from_public_bytes(public_key_bytes)
             signature = binascii.unhexlify(as_dict['signature'])
@@ -93,7 +97,7 @@ class Message:
             data = DataType.from_json(data_bytes)
 
         except Exception as exc:
-            raise common.ConstructionError(f"Can't construct {cls.__name__} from:\n\n{json_str}") from exc
+            raise common.ConstructionError(f"Can't construct {cls.__name__} from:\n\n{json_str!r}") from exc
 
         cls.RECEIVED_SALTS[public_key_bytes].add(salt)
         return cls(
@@ -159,27 +163,51 @@ class Message:
         )
         return message.to_bytes()
 
-@Message.register_type
+@WrappedMessage.register_type
 @dataclasses.dataclass(frozen=True)
 class Error(common.BaseFrozen):
     error_message: str
 
-@Message.register_type
-@dataclasses.dataclass(frozen=True)
-class DiceSend(common.BaseFrozen):
-    """
-    How the server sends the dice to the client.
-
-    TODO: Encryption maybe, but maybe not because that might be annoying.
-
-    But if we do encryption, then change the actual contents to the encrypted
-    bytes, and convert dice_faces to a cached_property or something.
-    """
-    dice_faces: list[int]
 
 # Kinda gross-ish, but I'm doing this to keep the base game not caring about
 # network stuff while simplifying the messages and avoid a message wrapping
 # a message that says what kind of action it is.
-Message.register_type(actions.Bid)
-Message.register_type(actions.Challenge)
-Message.register_type(actions.Exact)
+WrappedMessage.register_type(actions.Bid)
+WrappedMessage.register_type(actions.Challenge)
+WrappedMessage.register_type(actions.Exact)
+
+### Handshake Messages
+@WrappedMessage.register_type
+@dataclasses.dataclass(frozen=True)
+class FromServerHandshake(common.BaseFrozen):
+    message: str = "Who dis?"
+
+@WrappedMessage.register_type
+@dataclasses.dataclass(frozen=True)
+class ToServerHandshake(common.BaseFrozen):
+    name: str
+
+### General Use Messages: FROM SERVER TO CLIENT
+@WrappedMessage.register_type
+@dataclasses.dataclass(frozen=True)
+class ActionRequest(common.BaseFrozen):
+    """
+    FROM SERVER TO CLIENT: request an action. Client should respond with action
+
+    Fields should match argument to players.PlayerABC.get_action
+    """
+    round_actions: list[actions.Action]
+    is_single_die_round: bool
+    num_dice_in_play: int
+    num_players_alive: int
+
+@WrappedMessage.register_type
+@dataclasses.dataclass(frozen=True)
+class SetDice(common.BaseFrozen):
+    """
+    FROM SERVER TO CLIENT: set the dice. Client should respond with Ack.
+    """
+    dice: collections.Counter[int]
+
+
+### General Use Messages: FROM CLIENT TO SERVER

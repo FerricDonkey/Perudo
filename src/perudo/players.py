@@ -3,14 +3,15 @@ import collections
 import dataclasses
 import math
 import random
+import typing
 
 from perudo import actions, common
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(kw_only=True)
 class PlayerABC:
     name: str
-    cur_dice: collections.Counter[int] = dataclasses.field(default_factory=collections.Counter)
+    cur_dice: collections.Counter[int] = dataclasses.field(default_factory=collections.Counter[int])
     #action_histories: list[list[Action]] = dataclasses.field(default_factory=list)
 
     @property
@@ -37,7 +38,7 @@ class PlayerABC:
         raise NotImplementedError('Implement me bro')
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(kw_only=True)
 class HumanPlayer(PlayerABC):
     """
     Gets action from player via use of input
@@ -58,6 +59,7 @@ class HumanPlayer(PlayerABC):
         if is_single_die_round and isinstance(last_action, actions.Bid):
             fixed_face = last_action.face
 
+        action: actions.Action
         while True:
             if not round_actions:
                 action = actions.Bid.get_from_human(fixed_face=fixed_face)
@@ -82,7 +84,7 @@ class HumanPlayer(PlayerABC):
         self.cur_dice = dice.copy()  # paranoid aliasing prevention - shouldn't ever matter
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(kw_only=True)
 class RandomLegalPlayer(PlayerABC):
     """
     Chooses a random move that's legal and does it. Has a max bid it will never
@@ -131,7 +133,7 @@ class RandomLegalPlayer(PlayerABC):
         return actions.Bid(face=face, count=count)
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(kw_only=True)
 class ProbalisticPlayer(PlayerABC):
     set_dice = RandomLegalPlayer.set_dice
 
@@ -241,8 +243,8 @@ class ProbalisticPlayer(PlayerABC):
             is_single_die_round=is_single_die_round,
             num_other_dice=num_other_dice,
         )
-        e_challenge = p_challenge - (1 - p_challenge)
-        e_exact = p_exact * (num_players_alive - 1) - (1 - p_exact)
+        # e_challenge = p_challenge - (1 - p_challenge)
+        # e_exact = p_exact * (num_players_alive - 1) - (1 - p_exact)
         # TODO compare to e_ version
         actions_values: list[tuple[actions.Action, float]] = [
             (actions.Challenge(), p_challenge),
@@ -251,6 +253,7 @@ class ProbalisticPlayer(PlayerABC):
 
         # For bids, the expected value is calculated assuming the next player
         # challenges
+        allowed_faces: typing.Iterable[int]
         if is_single_die_round:
             allowed_faces = (previous_bid.face,)
         else:
@@ -273,8 +276,8 @@ class ProbalisticPlayer(PlayerABC):
             # We could say that the other guy doing an exact is better for us
             # because other people also lose dice, but we're not gonna, because
             # we don't really think that's gonna happen.
-            e_challenge = -p_challenge + (1 - p_challenge)
-            e_exact = -p_exact + (1 - p_exact)
+            # e_challenge = -p_challenge + (1 - p_challenge)
+            # e_exact = -p_exact + (1 - p_exact)
 
             # TODO compare to e_ version
             actions_values.append((actions.Bid(face=face, count=min_count), min(1 - p_challenge, 1 - p_exact)))
