@@ -142,11 +142,16 @@ class Connection:
             wrapped = await self._receive_wrapped_message(reader=self._reader)
         except Exception as exc:
             await self.close()
-            raise common.ConstructionError(f"Error receiving message: {type(exc).__name__}: {', '.join(map(str, exc.args))}") from exc
+            error_message = f"Receive failed: {type(exc).__name__}: {', '.join(map(str, exc.args))}"
+            print('>>>>>', error_message)
+            return messaging.Corrupted(details=error_message)
 
         if wrapped.public_key != self._target_public_key:
             await self.close()
-            raise common.ConstructionError(f"Public key mismatch: {wrapped.public_key} != {self._target_public_key}")
+            error_message = f"Public key mismatch: {wrapped.public_key} != {self._target_public_key}"
+            print('>>>>>', error_message)
+            return messaging.Corrupted(details=error_message)
+
         return wrapped.data
 
     async def ping(self) -> bool:

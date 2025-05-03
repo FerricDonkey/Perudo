@@ -11,6 +11,7 @@ import contextlib
 import dataclasses
 import functools
 import inspect
+import random
 import socket
 import threading
 import typing as ty
@@ -91,6 +92,8 @@ class Server(_DummyServer):
     max_players_per_game: int = 100
     max_concurrent_games: int = 100
 
+    is_alive: bool = True
+
     port: int = 1337
     private_key: ed25519.Ed25519PrivateKey = dataclasses.field(default_factory=ed25519.Ed25519PrivateKey.generate)
     _asyncio_loop: asyncio.AbstractEventLoop = dataclasses.field(default_factory=asyncio.new_event_loop)
@@ -105,6 +108,21 @@ class Server(_DummyServer):
     def _async_thread(self) -> threading.Thread:
         return threading.Thread(target=self._asyncio_loop.run_until_complete, args=(self.start_server(),))
 
+    async def _purge_disconnected(self) -> None:
+        while self.is_alive:
+            for _ in range(30):
+                await asyncio.sleep(1)
+                for name, connection in list(self.name_to_connection_d.items()):
+                    if connection.is_closing():
+                        del self.name_to_connection_d[name]
+
+            names = list(self.name_to_connection_d.keys())
+            players = (self.name_to_connection_d[name] for name in names)
+            still_connected = await asyncio.gather(*(player.ping() for player in players))
+            for name, is_connected in zip(names, still_connected):
+                if not is_connected:
+                    del self.name_to_connection_d[name]
+
     async def start_server(self) -> None:
         """
         Starts the server - but if you want it to actually manage the game,
@@ -117,6 +135,7 @@ class Server(_DummyServer):
             await asyncio.gather(
                 server_v4.serve_forever(),
                 server_v6.serve_forever(),
+                self._purge_disconnected(),
             )
 
     def sync_run(self) -> None:
@@ -151,7 +170,20 @@ class Server(_DummyServer):
         reader: asyncio.StreamReader,
         writer: asyncio.StreamWriter,
     ) -> None:
-        # Make the connection object
+        """
+        Make the connection object, and dispatch to handler based on first
+        message.
+
+        Note: This method closes the connection when it ends, so make sure
+        the handlers that need the connection alive until some condition is met
+        do not return until then
+        """
+        if not self.is_alive:
+            print("-- Received connection, but server is dead - closing.")
+            writer.close()
+            await writer.wait_closed()
+            return
+
         try:
             connection = await nc.Connection.from_handshake_server_side(
                 reader=reader,
@@ -166,6 +198,7 @@ class Server(_DummyServer):
 
         # Dispatch to handler based on first message.
         try:
+            self.name_to_connection_d[connection.name] = connection
             message_obj = await connection.receive_obj()
             handler = self.MESSAGE_TYPE_TO_HANDLER_D[type(message_obj)]
             await handler(connection, message_obj)
@@ -201,8 +234,70 @@ class Server(_DummyServer):
         )
 
     @_register_handler
-    async def _handle_new_room(self, connection: nc.Connection, message: messaging.CreateRoom) -> None:
-        pass
+    async def _handle_create_room(self, connection: nc.Connection, message: messaging.CreateRoom) -> None:
+        room_name = message.room_name
+        if room_name in self.room_name_to_game_manager_d:
+            error_message = f"Rejected: Room {room_name} already exists"
+            await connection.send_obj(
+                messaging.Error(error_message=error_message)
+            )
+            print(">>>>", error_message)
+            await connection.close()
+            return
+
+        validation_error = message.check_for_errors(max_num_players=self.max_players_per_game)
+        if validation_error:
+            await connection.send_obj(
+                messaging.Error(error_message=validation_error)
+            )
+            print(">>>>", validation_error)
+            await connection.close()
+
+        room = GameManager.from_create_message(
+            message=message,
+            connection=connection,
+            asyncio_loop=self._asyncio_loop,
+        )
+        self.room_name_to_game_manager_d[room_name] = room
+        await room.start_manager()
+
+    @_register_handler
+    async def _handle_join_room(self, connection: nc.Connection, message: messaging.JoinRoom) -> None:
+        room_name = message.room_name
+        # Pick room at random if not specified
+        if room_name is None:
+            rooms_with_space = [room for room in self.room_name_to_game_manager_d.values() if len(room.players) < room.num_players]
+            if not rooms_with_space:
+                error_message = "Rejected: No rooms with space"
+                await connection.send_obj(
+                    messaging.Error(error_message=error_message)
+                )
+                print(">>>>", error_message)
+                await connection.close()
+                return
+            room_name = random.choice(rooms_with_space).room_name
+
+        # Otherwise, make sure room exists
+        elif room_name not in self.room_name_to_game_manager_d:
+            error_message = f"Rejected: Room {room_name} does not exist"
+            await connection.send_obj(
+                messaging.Error(error_message=error_message)
+            )
+            print(">>>>", error_message)
+            await connection.close()
+            return
+
+        room = self.room_name_to_game_manager_d[room_name]
+        player = await room.add_player_from_connection(
+            connection=connection,
+            asyncio_loop=self._asyncio_loop,
+        )
+
+        # If player is not None, was successfully added to room. Wait till game ends
+        if player is not None:
+            while room.is_alive:
+                await asyncio.sleep(2)
+
 
 @dataclasses.dataclass
 class RemotePlayer(pl.PlayerABC):
@@ -235,6 +330,12 @@ class RemotePlayer(pl.PlayerABC):
             self.asyncio_loop,
         )
         return future.result(timeout=self.TIMEOUT)
+
+    def send_round_summary(self, round_summary: pg.RoundSummary) -> None:
+        self._async_do(self.connection.send_obj(round_summary))
+
+    def send_game_summary(self, game_summary: pg.GameSummary) -> None:
+        self._async_do(self.connection.send_obj(game_summary))
 
     def get_action(
         self,
@@ -287,12 +388,13 @@ class GameManager:
     num_players: int
     game: pg.PerudoGame | None = None
     game_thread: threading.Thread | None = None
+    is_alive: bool = True
 
     async def add_player_from_connection(
         self,
         connection: nc.Connection,
         asyncio_loop: asyncio.AbstractEventLoop,
-    ) -> None:
+    ) -> RemotePlayer | None:
         """
         Add a player to the game. NOTE: There currently shouldn't be race
         conditions allowing more players than allowed to be added, because there
@@ -315,7 +417,7 @@ class GameManager:
                 messaging.Error(error_message=error_msg)
             )
             print(">>>>", error_msg)
-            return
+            return None
 
         if len(self.players) >= self.num_players:
             error_msg = f"Rejected: Game is full"
@@ -323,9 +425,10 @@ class GameManager:
                 messaging.Error(error_message=error_msg)
             )
             print(">>>>", error_msg)
-            return
+            return None
 
         self.players.append(new_player)
+        return new_player
 
     async def _wait_until_full(self) -> None:
         """
@@ -371,7 +474,7 @@ class GameManager:
                 for index in reversed(player_indexes_to_remove):
                     del self.players[index]
 
-    async def start(self) -> None:
+    async def start_manager(self) -> None:
         """
         Waits until there are enough players to start the game, then starts it
 
@@ -396,5 +499,72 @@ class GameManager:
             print_non_human_dice=False,
         )
 
-        self.game_thread = threading.Thread(target=self.game.main_loop)
+        self.game_thread = threading.Thread(
+            target=self._start_game,
+        )
         self.game_thread.start()
+
+        # Pause here until game is done, then shutdown
+        while self.game_thread.is_alive():
+            await asyncio.sleep(1)
+        self.game_thread.join()
+        self.game_thread = None
+        self.game = None
+
+    def _start_game(self) -> None:
+        """
+        Intended to be run in a separate thread. Starts the game
+        """
+        assert self.game is not None, "Game not started yet"
+        self.game.main_loop(
+            round_end_callback=self._broadcast_round_end_cb,
+            game_end_callback=self._broadcast_winner_cb,
+        )
+
+    def _broadcast_round_end_cb(self, losers: list[pl.PlayerABC]) -> None:
+        assert self.game is not None, "Game not started yet"
+        round_summary = pg.RoundSummary.from_game_losers(
+            game=self.game,
+            losers=losers,
+        )
+        for player in self.players:
+            if isinstance(player, RemotePlayer):
+                player.send_round_summary(round_summary=round_summary)
+
+    def _broadcast_winner_cb(self, winner: pl.PlayerABC) -> None:
+        assert self.game is not None, "Game not started yet"
+        game_summary = pg.GameSummary.from_game(self.game, winner_index=self.game.players.index(winner))
+        for player in self.players:
+            if isinstance(player, RemotePlayer):
+                player.send_game_summary(game_summary=game_summary)
+
+    @classmethod
+    def from_create_message(
+        cls,
+        message: messaging.CreateRoom,
+        connection: nc.Connection,
+        asyncio_loop: asyncio.AbstractEventLoop,
+    ) -> ty.Self:
+        players: list[pl.PlayerABC] = []
+
+        players.extend(
+            pl.ProbalisticPlayer(name=f'ServerLocal-Prob-{index}')
+            for index in range(message.num_probabilistic_players)
+        )
+
+        players.extend(
+            pl.ProbalisticPlayer(name=f'ServerLocal-Rando-{index}')
+            for index in range(message.num_probabilistic_players)
+        )
+
+        players.append(RemotePlayer(
+            name=connection.name,
+            connection=connection,
+            asyncio_loop=asyncio_loop,
+        ))
+
+        return cls(
+            room_name=message.room_name,
+            players=players,
+            num_players=message.num_players,
+        )

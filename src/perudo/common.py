@@ -1,6 +1,7 @@
 """
 Contains common constants, functions, and classes used throughout the project.
 """
+import collections
 import dataclasses
 import json
 import random
@@ -107,6 +108,7 @@ class BaseFrozen:
                 field.name: field.type
                 for field in dataclasses.fields(cls)
             }
+
             for field_name, value in input_d.items():
                 if field_name not in field_name_to_type_d:
                     errors.append(f"Invalid field {field_name} in input_d to {cls.__name__}")
@@ -123,6 +125,13 @@ class BaseFrozen:
 
                 if issubclass(FieldType, BaseFrozen):
                     kwargs[field_name] = FieldType.from_dict(value)
+                elif (
+                    FieldType is collections.Counter
+                    and isinstance(value, dict)
+                ):
+                    value = collections.Counter(ty.cast(dict[int, int], value))
+                    kwargs[field_name] = value
+
                 elif not isinstance(value, FieldType):
                     errors.append(
                         f"Field {field_name} in input_d to {cls.__name__} expected "

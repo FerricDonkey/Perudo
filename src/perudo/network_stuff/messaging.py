@@ -14,6 +14,7 @@ from cryptography.hazmat.primitives import serialization
 
 from perudo import common
 from perudo import actions
+from perudo import perudo_game as pg
 
 @dataclasses.dataclass(frozen=True)
 class WrappedMessage:
@@ -175,6 +176,7 @@ class Error(common.BaseFrozen):
 WrappedMessage.register_type(actions.Bid)
 WrappedMessage.register_type(actions.Challenge)
 WrappedMessage.register_type(actions.Exact)
+WrappedMessage.register_type(pg.RoundSummary)
 
 ### Handshake Messages
 @WrappedMessage.register_type
@@ -187,12 +189,21 @@ class FromServerHandshake(common.BaseFrozen):
 class ToServerHandshake(common.BaseFrozen):
     name: str
 
+### Can be used by client or server
 @WrappedMessage.register_type
 @dataclasses.dataclass(frozen=True)
 class NoOp(common.BaseFrozen):
     """
     Exists mostly just to test that the connection is alive
     """
+
+@WrappedMessage.register_type
+@dataclasses.dataclass(frozen=True)
+class Corrupted(common.BaseFrozen):
+    """
+    Exists so something can be returned on reception of a corrupted message.
+    """
+    details: ty.Any
 
 ### General Use Messages: FROM SERVER TO CLIENT
 @WrappedMessage.register_type
@@ -230,7 +241,7 @@ class RequestRoomList(common.BaseFrozen):
 @WrappedMessage.register_type
 @dataclasses.dataclass(frozen=True)
 class JoinRoom(common.BaseFrozen):
-    room: str
+    room_name: str | None  # value of None means to pick a room at random
 
 @WrappedMessage.register_type
 @dataclasses.dataclass(frozen=True)

@@ -1,3 +1,20 @@
+"""
+Core game logic for Perudo (Liar's Dice).
+
+This module implements the main game mechanics for Perudo, a dice game where players
+make bids about the total number of dice showing a particular value across all players'
+dice. Players can challenge others' bids, with the loser losing one die. The game
+continues until only one player has dice remaining.
+
+Key game rules:
+- Each player starts with 5 dice
+- Players bid on total number of dice showing a value across all players
+- Player can challenge previous bid (calling "liar")
+- Ones are wild except in "ones" bids
+- Loser of each round loses one die
+- Last player with dice wins
+"""
+
 import argparse
 import collections
 import dataclasses
@@ -9,7 +26,8 @@ from perudo import actions
 from perudo import players as pl
 
 
-# DO NOT REGISTER THIS ACTION
+def dice_to_str(dice_counter: collections.Counter[int]) -> str:
+    return ', '.join(f'{face}: {value}' for face, value in sorted(dice_counter.items()))
 
 
 @dataclasses.dataclass
@@ -148,12 +166,11 @@ class PerudoGame:
                 if not (self.print_non_human_dice or isinstance(self.players[player_index], pl.HumanPlayer)):
                     continue
                 dice_counter = self.current_round_dice_by_player[player_index]
-                dice_str = ', '.join(f'{face}: {value}' for face, value in sorted(dice_counter.items()))
                 print(
                     "{name} ({dice_count} dice): {dice_string}".format(
                         name=self.players[player_index].name,
                         dice_count=self.player_index_to_num_dice[player_index],
-                        dice_string=dice_str,
+                        dice_string=dice_to_str(dice_counter),
                     )
                 )
             print("-------------------")
@@ -162,7 +179,7 @@ class PerudoGame:
     def end_round(
         self,
         loser_indexes: ty.Collection[int],
-        round_end_callback: ty.Callable[[], None] | None = None,
+        round_end_callback: ty.Callable[[list[pl.PlayerABC]], None] | None = None,
     ) -> bool:
         """
         End this round, start a new one IF anyone survived.
@@ -200,13 +217,13 @@ class PerudoGame:
             is_game_continuing = True
 
         if round_end_callback is not None:
-            round_end_callback()
+            round_end_callback([self.players[loser_index] for loser_index in loser_indexes])
 
         return is_game_continuing
 
     def take_turn(
         self,
-        round_end_callback: ty.Callable[[], None] | None = None,
+        round_end_callback: ty.Callable[[list[pl.PlayerABC]], None] | None = None,
     ) -> bool:
         """
         returns True if the game continues, False if not
@@ -283,52 +300,25 @@ class PerudoGame:
         """
         Print a summary of the game. DO NOT CALL DURING A ROUND
 
-        This is kind of redundant now that verbose is added, but I'm leaving
-        it for now because I can convert it into a machine readable format
-        later
+        This is kind of redundant to use locally now that verbose is added, but
+        I'm leaving it for now for testing purposes - network play will send
+        the objects it creates to client players, who will use them to see
+        what happened, since they don't have access to the game itself.
         """
-        if len(self.all_rounds_losers) != len(self.all_rounds_actions):
-            raise RuntimeError("print_summary called during active round")
-
-        print("Game Summary:\n==============")
-        for round_index, (
-            round_players,
-            round_actions,
-            round_dice,
-            round_losers,
-            single_die_round,
-        ) in enumerate(zip(
-            self.all_rounds_living_players,
-            self.all_rounds_actions,
-            self.all_rounds_dice,
-            self.all_rounds_losers,
-            self.single_die_round_history,
-            strict=True
-        ), start=1):
-            header = f"Round {round_index} ({single_die_round=})"
-            print(f'{header}\n{"-" * len(header)}')
-            for player in round_players:
-                dice_str = ', '.join(f'{face}: {value}' for face, value in sorted(round_dice[player].items()))
-                print(f"    {self.players[player].name} ({sum(round_dice[player].values())} dice): {dice_str}")
-            print('    -----------------')
-
-            action_print_width = len(str(len(round_actions)))
-            for action_index, action in enumerate(round_actions):
-                player_index = round_players[action_index % len(round_players)]
-                cur_player = self.players[player_index]
-                print(f"    {action_index:>{action_print_width}} - {cur_player.typed_name}: {action}")
-            print('    -----------------')
-            print(f'    Round Loser(s): {", ".join(self.players[index].typed_name for index in round_losers)}\n')
+        game_summary = GameSummary.from_game(self, self.cur_player_index)
+        game_summary.print()
 
     def main_loop(
         self,
-        round_end_callback: ty.Callable[[], None] | None = None,
+        round_end_callback: ty.Callable[[list[pl.PlayerABC]], None] | None = None,
         game_end_callback: ty.Callable[[pl.PlayerABC], None] | None = None,
     ) -> int:
         """
         Suitable for running the game purely locally
 
-        returns winning index
+        :param round_end_callback: Function called at end of each round with list of losing players
+        :param game_end_callback: Function called at game end with winning player
+        :return: winning player index
         """
         first_player_index = random.randrange(len(self.players))
         self.start_new_round(
@@ -343,6 +333,116 @@ class PerudoGame:
             game_end_callback(self.players[self.cur_player_index])
 
         return self.cur_player_index
+
+
+@dataclasses.dataclass(frozen=True)
+class RoundSummary(common.BaseFrozen):
+    """
+    Note that this class primarily exists so that it can be sent over the
+    network via standard send_obj methods.
+    """
+    ordered_players: list[str]
+    all_player_dice: list[collections.Counter[int]]
+    all_actions: list[actions.Action]
+    single_die_round: bool
+    losers: list[str]
+
+    @classmethod
+    def from_game_losers(
+        cls,
+        game: PerudoGame,
+        losers: list[pl.PlayerABC],
+    ) -> ty.Self:
+        return cls(
+            ordered_players=[game.players[index].name for index in game.all_rounds_living_players[-1]],
+            all_player_dice=game.all_rounds_dice[-1],
+            all_actions=game.all_rounds_actions[-1],
+            single_die_round=game.single_die_round_history[-1],
+            losers=[player.name for player in losers],
+        )
+
+    def print(self) -> None:
+        print('===================')
+        for player, dice in zip(self.ordered_players, self.all_player_dice):
+            print(f'  {player}: {dice_to_str(dice)}')
+        print('  -----------------')
+        action_print_width = len(str(len(self.all_actions)))
+        player_print_width = max(len(player) for player in self.ordered_players)
+        for action_index, action in enumerate(self.all_actions):
+            player = self.ordered_players[action_index % len(self.ordered_players)]
+            print(f'  {action_index:>{action_print_width}} - {player+':':<{player_print_width+1}} {action}')
+        print('  -----------------')
+        print(f'  Round Loser(s): {", ".join(self.losers)}\n')
+
+@dataclasses.dataclass(frozen=True)
+class GameSummary(common.BaseFrozen):
+    """
+    Note that this class primarily exists so that it can be sent over the
+    network via standard send_obj methods.
+    """
+    all_rounds_actions: list[list[actions.Action]]
+    all_rounds_dice: list[list[collections.Counter[int]]]
+    all_rounds_living_players: list[list[str]]
+    all_rounds_losers: list[list[str]]
+    single_die_round_history: list[bool]
+    winner: str
+
+    @classmethod
+    def from_game(
+        cls,
+        game: PerudoGame,
+        winner_index: int,
+    ) -> ty.Self:
+        return cls(
+            all_rounds_actions=game.all_rounds_actions,
+            all_rounds_dice=game.all_rounds_dice,
+            all_rounds_living_players=[
+                [
+                    game.players[player_index].name
+                    for player_index in player_indices
+                ]
+                for player_indices in game.all_rounds_living_players
+            ],
+            all_rounds_losers=[
+                [
+                    game.players[player_index].name
+                    for player_index in player_indices
+                ]
+                for player_indices in game.all_rounds_losers
+            ],
+            single_die_round_history=game.single_die_round_history,
+            winner=game.players[winner_index].name,
+        )
+
+    def print(self) -> None:
+        print("Game Summary:\n==============")
+        for round_index, (
+                ordered_players,
+                round_actions,
+                round_dice,
+                round_losers,
+                single_die_round,
+        ) in enumerate(
+            zip(
+                self.all_rounds_living_players,
+                self.all_rounds_actions,
+                self.all_rounds_dice,
+                self.all_rounds_losers,
+                self.single_die_round_history,
+                strict=True
+            ), start=1
+        ):
+            header = f"Round {round_index} ({single_die_round=})"
+            print(f'{"-" * len(header)}\n{header}')
+            round_summary = RoundSummary(
+                ordered_players=ordered_players,
+                all_player_dice=round_dice,
+                all_actions=round_actions,
+                single_die_round=single_die_round,
+                losers=round_losers,
+            )
+            round_summary.print()
+        print(f"==============\nWinner: {self.winner}\n")
 
 
 def local_main() -> int:

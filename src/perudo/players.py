@@ -90,7 +90,6 @@ class RandomLegalPlayer(PlayerABC):
     Chooses a random move that's legal and does it. Has a max bid it will never
     exceed.
     """
-    max_count: int = 100  # maximum bid bot will ever submit
     end_pct_chance: float = 0.5
     exact_pct_change: float = 0.5
 
