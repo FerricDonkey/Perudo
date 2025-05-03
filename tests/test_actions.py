@@ -7,7 +7,7 @@ import pytest
 
 from perudo import actions
 from perudo import common
-from perudo import game as pg
+from perudo import perudo_game as pg
 from perudo import players as pl
 
 

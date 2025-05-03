@@ -75,10 +75,17 @@ class BaseFrozen:
     It provides methods to create an instance from a dictionary or a JSON string and
     to convert the instance into a dictionary or a JSON string.
     """
-    def __post_init__(self):
-        errors = []
+    def __post_init__(self) -> None:
+        errors: list[str] = []
         for field in dataclasses.fields(self):
             value = getattr(self, field.name)
+            if not isinstance(field.type, type):
+                raise TypeError(
+                    f"{field.name} of {type(self).__name__} is not a runtime "
+                    "type - this probably means you used a string or similar "
+                    "as the type hint, which is not allowed. (If it needs to "
+                    "be, this code can be relaxed.)"
+                )
             if not isinstance(value, field.type):
                 errors.append(
                     f'Field {field.name} expected type {field.type}, but got '
@@ -91,14 +98,28 @@ class BaseFrozen:
     def from_dict(cls, input_d: dict[str, ty.Any]) -> ty.Self:
         try:
             # Handle nested BaseFrozen types
-            errors = []
-            kwargs = {}
-            field_name_to_type_d: dict[str, type] = {field.name: field.type for field in dataclasses.fields(cls)}
+            errors: list[str] = []
+            kwargs: dict[str, ty.Any] = {}
+
+            # really always a type dict[str, type], but that's handled below
+            # to keep type checking happy.
+            field_name_to_type_d: dict[str, ty.Any] = {
+                field.name: field.type
+                for field in dataclasses.fields(cls)
+            }
             for field_name, value in input_d.items():
                 if field_name not in field_name_to_type_d:
                     errors.append(f"Invalid field {field_name} in input_d to {cls.__name__}")
                     continue
+
                 FieldType = field_name_to_type_d[field_name]
+                if not isinstance(FieldType, type):
+                    raise TypeError(  # this is not a ConstructionError because it's a bug, not bad input
+                        f"{field_name} of {cls.__name__} is not a runtime "
+                        "type - this probably means you used a string or similar "
+                        "as the type hint, which is not allowed. (If it needs to "
+                        "be, this code can be relaxed.)"
+                    )
 
                 if issubclass(FieldType, BaseFrozen):
                     kwargs[field_name] = FieldType.from_dict(value)
@@ -114,7 +135,8 @@ class BaseFrozen:
                     f"Could not construct {cls.__name__} from specified input:\n    - "
                     + "\n    - ".join(errors)
                 )
-            return cls(**kwargs)  # type: ignore[call-arg] pycharm's type checker is wrong here
+
+            return cls(**kwargs)  # type: ignore[call-arg] # pycharm's type checker is wrong here
 
         except Exception as exc:
             raise ConstructionError(f"Can't construct {cls.__name__} from {input_d}") from exc
@@ -124,9 +146,14 @@ class BaseFrozen:
         try:
             return cls.from_dict(json.loads(json_str))
         except:
-            raise ConstructionError(f"Can't construct {cls.__name__} from:\n\n{json_str}")
+            # display_str exists to make mypy happy, while still allowing actual
+            # formatted json to be displayed in the error message if json_str is
+            # a string (mypy gets annoyed about dropping bytes objects in fstrings
+            # because it's stupid).
+            display_str = repr(json_str) if isinstance(json_str, bytes) else json_str
+            raise ConstructionError(f"Can't construct {cls.__name__} from:\n\n{display_str!r}")
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, ty.Any]:
         return dataclasses.asdict(self)
 
     def to_json(self) -> str:

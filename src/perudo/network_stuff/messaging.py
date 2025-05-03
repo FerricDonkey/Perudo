@@ -187,6 +187,13 @@ class FromServerHandshake(common.BaseFrozen):
 class ToServerHandshake(common.BaseFrozen):
     name: str
 
+@WrappedMessage.register_type
+@dataclasses.dataclass(frozen=True)
+class NoOp(common.BaseFrozen):
+    """
+    Exists mostly just to test that the connection is alive
+    """
+
 ### General Use Messages: FROM SERVER TO CLIENT
 @WrappedMessage.register_type
 @dataclasses.dataclass(frozen=True)
@@ -205,9 +212,48 @@ class ActionRequest(common.BaseFrozen):
 @dataclasses.dataclass(frozen=True)
 class SetDice(common.BaseFrozen):
     """
-    FROM SERVER TO CLIENT: set the dice. Client should respond with Ack.
+    FROM SERVER TO CLIENT: tell the client what dice they get
     """
     dice: collections.Counter[int]
 
+@WrappedMessage.register_type
+@dataclasses.dataclass(frozen=True)
+class HereRoomsList(common.BaseFrozen):
+    room_to_members: dict[str, list[str]]
 
 ### General Use Messages: FROM CLIENT TO SERVER
+@WrappedMessage.register_type
+@dataclasses.dataclass(frozen=True)
+class RequestRoomList(common.BaseFrozen):
+    pass
+
+@WrappedMessage.register_type
+@dataclasses.dataclass(frozen=True)
+class JoinRoom(common.BaseFrozen):
+    room: str
+
+@WrappedMessage.register_type
+@dataclasses.dataclass(frozen=True)
+class CreateRoom(common.BaseFrozen):
+    room_name: str
+    num_network_players: int
+    num_random_players: int
+    num_probabilistic_players: int
+
+    def check_for_errors(self, max_num_players: int) -> str | None:
+        if self.num_network_players <= 0:
+            return "Must have at least one network player"
+        elif self.num_random_players < 0:
+            return "Random player count must be non-negative"
+        elif self.num_probabilistic_players < 0:
+            return "Probabilistic player count must be non-negative"
+        elif self.num_players > max_num_players:
+            return f"Too many players: {self.num_players} > {max_num_players}"
+        elif self.num_players < 2:
+            return "Must have at least two players"
+
+        return None
+
+    @property
+    def num_players(self) -> int:
+        return self.num_network_players + self.num_random_players + self.num_probabilistic_players

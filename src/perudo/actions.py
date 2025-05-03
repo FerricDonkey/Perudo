@@ -11,7 +11,7 @@ class Action(common.BaseFrozen):
     All player actions should subclass this
     """
     ACTION_NAME: ty.ClassVar[str]
-    _ACTION_NAME_TO_ACTION_TYPE_D: ty.ClassVar[dict[str, type[ty.Self]]] = {}
+    _ACTION_NAME_TO_ACTION_TYPE_D: ty.ClassVar[dict[str, type['Action']]] = {}
 
     @abc.abstractmethod
     def validate(
@@ -27,13 +27,15 @@ class Action(common.BaseFrozen):
         :param is_single_die_round: Whether this is a round started by a single die
         :return: The action if it was valid, or an InvalidAction object if not
         """
-        raise NotImplemented('Implement me bro.')
+        raise NotImplementedError('Implement me bro.')
 
     @classmethod
     @abc.abstractmethod
     def get_from_human(cls, fixed_face: int | None) -> ty.Self:
         action_name = common.get_option_from_human(cls._ACTION_NAME_TO_ACTION_TYPE_D.keys())
-        return cls._ACTION_NAME_TO_ACTION_TYPE_D[action_name].get_from_human(fixed_face)
+        action = cls._ACTION_NAME_TO_ACTION_TYPE_D[action_name].get_from_human(fixed_face)
+        assert isinstance(action, cls)
+        return action
 
 
     @classmethod
@@ -52,7 +54,7 @@ class EndAction(Action):
     @abc.abstractmethod
     def get_losers[T](
         self,
-        previous_action: Action,
+        previous_action: Action | None,
         all_dice: ty.Collection[int],
         is_single_die_round: bool,
         caller: T,
@@ -73,18 +75,19 @@ class EndAction(Action):
         :param other_players: All players who aren't the caller
         :return: True if dude who did it was successful, False if not
         """
-        raise NotImplemented('Implement me bro.')
+        raise NotImplementedError('Implement me bro.')
 
     @classmethod
-    def get_from_human(cls, fixed_face:int) -> ty.Self:
+    def get_from_human(cls, fixed_face:int | None) -> ty.Self:
         return cls()
 
+    @abc.abstractmethod
     def validate(
         self,
-        previous: None | ty.Self,
+        previous: None | Action,
         is_single_die_round: bool,
-    ) -> ty.Self:
-        return self
+    ) -> 'EndAction':
+        raise NotImplementedError('Implement me bro.')
 
 
 @dataclasses.dataclass(frozen=True)
@@ -100,7 +103,7 @@ class InvalidAction(EndAction):
 
     def get_losers[T](
         self,
-        previous_action: Action,
+        previous_action: Action | None,
         all_dice: ty.Collection[int],
         is_single_die_round: bool,
         caller: T,
@@ -110,8 +113,15 @@ class InvalidAction(EndAction):
         return [caller]
 
     @classmethod
-    def get_from_human(cls, fixed_face:int) -> ty.Self:
+    def get_from_human(cls, fixed_face:int | None) -> ty.Self:
         raise RuntimeError(f'{cls.__name__} should not call get_from_human')
+
+    def validate(
+        self,
+        previous: None | Action,
+        is_single_die_round: bool,
+    ) -> 'EndAction':
+        return self
 
 
 @Action.register_action
@@ -195,7 +205,7 @@ class Challenge(EndAction):
 
     def get_losers[T](
         self,
-        previous_action: Action,
+        previous_action: Action | None,
         all_dice: ty.Collection[int],
         is_single_die_round: bool,
         caller: T,
@@ -231,7 +241,7 @@ class Exact(EndAction):
 
     def get_losers[T](
         self,
-        previous_action: Action,
+        previous_action: Action | None,
         all_dice: ty.Collection[int],
         is_single_die_round: bool,
         caller: T,

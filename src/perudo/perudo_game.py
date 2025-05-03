@@ -65,11 +65,11 @@ class PerudoGame:
     player_index_to_num_dice: list[int]
     cur_player_index: int = -1
     cur_round_single_die: bool = False
-    all_rounds_actions: list[list[actions.Action]] = dataclasses.field(default_factory=list)
-    all_rounds_dice: list[list[collections.Counter[int]]] = dataclasses.field(default_factory=list)
-    all_rounds_living_players: list[list[int]] = dataclasses.field(default_factory=list)
-    all_rounds_losers: list[list[int]] = dataclasses.field(default_factory=list)
-    single_die_round_history: list[bool] = dataclasses.field(default_factory=list)
+    all_rounds_actions: list[list[actions.Action]] = dataclasses.field(default_factory=list[list[actions.Action]])
+    all_rounds_dice: list[list[collections.Counter[int]]] = dataclasses.field(default_factory=list[list[collections.Counter[int]]])
+    all_rounds_living_players: list[list[int]] = dataclasses.field(default_factory=list[list[int]])
+    all_rounds_losers: list[list[int]] = dataclasses.field(default_factory=list[list[int]])
+    single_die_round_history: list[bool] = dataclasses.field(default_factory=list[bool])
     print_while_playing: bool = False
     print_non_human_dice: bool = True
 
@@ -159,7 +159,11 @@ class PerudoGame:
             print("-------------------")
 
 
-    def end_round(self, loser_indexes: ty.Collection[int]) -> bool:
+    def end_round(
+        self,
+        loser_indexes: ty.Collection[int],
+        round_end_callback: ty.Callable[[], None] | None = None,
+    ) -> bool:
         """
         End this round, start a new one IF anyone survived.
 
@@ -171,6 +175,7 @@ class PerudoGame:
             self.player_index_to_num_dice[index] = max(0, self.player_index_to_num_dice[index] - 1)
 
         # Start a new round if multiple people are still alive
+        is_game_continuing = False
         if sum(num > 0 for num in self.player_index_to_num_dice) > 1:
             losers_with_dice = [
                 index for index in loser_indexes
@@ -192,10 +197,17 @@ class PerudoGame:
                 first_player_index=next_player,
                 single_die_round=single_die_round,
             )
-            return True
-        return False
+            is_game_continuing = True
 
-    def take_turn(self) -> bool:
+        if round_end_callback is not None:
+            round_end_callback()
+
+        return is_game_continuing
+
+    def take_turn(
+        self,
+        round_end_callback: ty.Callable[[], None] | None = None,
+    ) -> bool:
         """
         returns True if the game continues, False if not
         """
@@ -245,7 +257,10 @@ class PerudoGame:
             if self.print_while_playing:
                 print(f'Loser(s): {", ".join(self.players[loser].typed_name for loser in losers)}')
 
-            return self.end_round(loser_indexes=losers)
+            return self.end_round(
+                loser_indexes=losers,
+                round_end_callback=round_end_callback,
+            )
 
         self.cur_player_index = self.next_living_player_index
         return True
@@ -305,7 +320,11 @@ class PerudoGame:
             print('    -----------------')
             print(f'    Round Loser(s): {", ".join(self.players[index].typed_name for index in round_losers)}\n')
 
-    def local_main_loop(self) -> int:
+    def main_loop(
+        self,
+        round_end_callback: ty.Callable[[], None] | None = None,
+        game_end_callback: ty.Callable[[pl.PlayerABC], None] | None = None,
+    ) -> int:
         """
         Suitable for running the game purely locally
 
@@ -316,8 +335,13 @@ class PerudoGame:
             first_player_index=first_player_index,
             single_die_round=False,  # Assuming we're not being weird.
         )
-        while self.take_turn():
+        while self.take_turn(round_end_callback=round_end_callback):
             pass
+
+        # self.cur_player_index is the winner
+        if game_end_callback is not None:
+            game_end_callback(self.players[self.cur_player_index])
+
         return self.cur_player_index
 
 
@@ -384,7 +408,7 @@ def local_main() -> int:
         print_while_playing=args.print_while_playing,
         print_non_human_dice=args.print_non_human_dice,
     )
-    who_won = game.local_main_loop()
+    who_won = game.main_loop()
     # if not args.verbose:
     #     game.print_summary()  # todo this is kind of redundant
     print(f"The winner was {game.players[who_won].name}")
