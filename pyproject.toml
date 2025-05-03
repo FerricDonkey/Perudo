@@ -23,3 +23,6 @@ include = ["perudo"]
 
 [tool.setuptools.dynamic]
 version = {attr = "perudo.__version__"}
+
+[tool.mypy]
+strict = true

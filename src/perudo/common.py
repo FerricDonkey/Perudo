@@ -136,10 +136,13 @@ class BaseFrozen:
                     + "\n    - ".join(errors)
                 )
 
-            return cls(**kwargs)  # type: ignore[call-arg] # pycharm's type checker is wrong here
+            # pycharm's type checker is wrong here
+            # noinspection PyArgumentList
+            return cls(**kwargs)
 
         except Exception as exc:
             raise ConstructionError(f"Can't construct {cls.__name__} from {input_d}") from exc
+
 
     @classmethod
     def from_json(cls, json_str: str | bytes) -> ty.Self:

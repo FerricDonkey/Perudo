@@ -29,11 +29,11 @@ class Connection:
 
     @functools.cached_property
     def ipaddress(self) -> str:
-        return self._writer.get_extra_info('peername')[0]
+        return ty.cast(str, self._writer.get_extra_info('peername')[0])
 
     @functools.cached_property
-    def port(self) -> str:
-        return self._writer.get_extra_info('peername')[1]
+    def port(self) -> int:
+        return ty.cast(int, self._writer.get_extra_info('peername')[1])
 
     @classmethod
     async def from_handshake_client_side(

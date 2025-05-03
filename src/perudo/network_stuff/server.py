@@ -49,7 +49,7 @@ class _DummyServer(abc.ABC, metaclass=abc.ABCMeta):
         handler.is_handler = True  # type: ignore
         return handler
 
-    def __init_subclass__(cls):
+    def __init_subclass__(cls) -> None:
         super().__init_subclass__()
         for handler in cls.__dict__.values():
             if not getattr(handler, 'is_handler', False):
