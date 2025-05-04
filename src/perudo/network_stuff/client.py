@@ -20,74 +20,8 @@ class ClientPlayer:
     Wraps a PlayerABC object, and uses it to interact with a game running
     on a server
     """
-    NAME_TO_TO_PLAYER_CONSTRUCTOR_D: ty.ClassVar[dict[
-        str,
-        pl.PlayerABC.ConstructorType
-    ]] = {}
-
     connection: nc.Connection
     player: pl.PlayerABC
-
-    @ty.overload
-    @classmethod
-    def register_player_class[
-        T: pl.PlayerABC.ConstructorType | type[pl.PlayerABC]
-    ](
-        cls,
-        name_or_constructor: str | None,
-    ) -> ty.Callable[[T], T]:
-        ...
-
-    @ty.overload
-    @classmethod
-    def register_player_class[
-        T: pl.PlayerABC.ConstructorType | type[pl.PlayerABC]
-    ](
-        cls,
-        name_or_constructor: T,
-    ) -> T:
-        ...
-
-    @classmethod
-    def register_player_class[
-        T: pl.PlayerABC.ConstructorType | type[pl.PlayerABC]
-    ](
-        cls,
-        name_or_constructor: str | T | None = None,
-    ) -> ty.Callable[[T], T] | T:
-        def inner(constructor: T) -> T:
-            name: str | None
-            error_message = (  # this is defined up here just because type checkers are confused if it's not
-                f'Tried to register {constructor} ({type(constructor).__name__}) '
-                'as a player class, but it is a type and not a subclass of PlayerABC. '
-                'This is not allowed.'
-            )
-            if isinstance(name_or_constructor, str):
-                name = name_or_constructor
-            else:
-                name = getattr(constructor, '__name__', None)
-                if name is None:
-                    raise TypeError(
-                        f'Tried to register {name_or_constructor} ({type(name_or_constructor).__name__}) '
-                        'as a player class, but it has no __name__ attribute. Use '
-                        '@ClientPlayer.register_player_class(name) as a decorator instead, '
-                        'or ClientPlayer.register_player_class(name)(constructor).'
-                    )
-
-            if isinstance(constructor, type):
-                if not issubclass(constructor, pl.PlayerABC):
-                    raise TypeError(error_message)
-
-                cls.NAME_TO_TO_PLAYER_CONSTRUCTOR_D[name] = constructor.from_name
-            else:
-                cls.NAME_TO_TO_PLAYER_CONSTRUCTOR_D[name] = constructor
-
-            return ty.cast(T, constructor)  # this cast wouldn't be necessary if type checkers were smarter.
-
-        if name_or_constructor is None or isinstance(name_or_constructor, str):
-            return inner
-
-        return inner(name_or_constructor)
 
     async def run_game_loop(self) -> None:
         """
@@ -131,13 +65,14 @@ class ClientPlayer:
     @classmethod
     def from_connection(
         cls,
-        player_constructor: str | pl.PlayerABC.ConstructorType,
+        player_constructor: str | pl.PlayerConstructorType,
         connection: nc.Connection,
     ) -> ty.Self:
-        if isinstance(player_constructor, str):
-            player_constructor = cls.NAME_TO_TO_PLAYER_CONSTRUCTOR_D[player_constructor]
 
-        player = player_constructor(connection.name)
+        player = pl.PlayerABC.from_constructor(
+            player_name=connection.name,
+            constructor=player_constructor,
+        )
 
         return cls(
             connection=connection,
@@ -192,7 +127,7 @@ class ClientManager:
     async def join_room(
         self,
         room_name: str | None,
-        player_constructor: str | pl.PlayerABC.ConstructorType,
+        player_constructor: str | pl.PlayerConstructorType,
     ) -> None:
         player = ClientPlayer.from_connection(
             player_constructor=player_constructor,
@@ -206,7 +141,7 @@ class ClientManager:
     async def create_room(
         self,
         room_name: str,
-        player_constructor: str | pl.PlayerABC.ConstructorType,
+        player_constructor: str | pl.PlayerConstructorType,
         num_network_players: int,
         num_random_players: int,
         num_probabilistic_players: int,
@@ -230,6 +165,3 @@ class ClientManager:
         await self.send_obj(create_message)
         await player.run_game_loop()
 
-ClientPlayer.register_player_class(pl.HumanPlayer)
-ClientPlayer.register_player_class(pl.ProbalisticPlayer)
-ClientPlayer.register_player_class(pl.RandomLegalPlayer)

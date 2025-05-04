@@ -8,6 +8,7 @@ import asyncio
 import sys
 
 from perudo.cli import cli_common as cc
+from perudo import players as pl
 
 from perudo.network_stuff import network_common as nc
 from perudo.network_stuff import client as nsc
@@ -64,12 +65,12 @@ def make_parser(parser: argparse.ArgumentParser | None=None) -> argparse.Argumen
 
     for subsubparser in (join_parser, create_parser):
         subsubparser.add_argument(
-            '--arbitrary-player', '--ap',
+            '--client-class', '--cc',
             type=str,
-            dest='arbitrary_player',
+            dest='client_class',
             required=True,
-            choices=sorted(nsc.ClientPlayer.NAME_TO_TO_PLAYER_CONSTRUCTOR_D.keys()),
-            help='Class to use for locally running player. Indicates desire to play'
+            choices=sorted(pl.PlayerABC.NAME_TO_TO_PLAYER_CONSTRUCTOR_D.keys()),
+            help='Player class that will run locally.',
         )
 
         subsubparser.add_argument(
@@ -105,7 +106,7 @@ async def join(
     name:str,
     ipaddress:str,
     port:int,
-    arbitrary_player:str,
+    constructor_name:str,
 ) -> int:
     manager = await nsc.ClientManager.from_network(
         name=name,
@@ -114,7 +115,7 @@ async def join(
     )
     await manager.join_room(
         room_name=None,
-        player_constructor=arbitrary_player,
+        player_constructor=constructor_name,
     )
     return 0
 
@@ -123,7 +124,7 @@ async def create(
     room_name: str,
     ipaddress:str,
     port:int,
-    arbitrary_player:str,
+    client_class:str,
     num_network_players:int,
     num_random_players:int,
     num_probabilistic_players:int,
@@ -135,7 +136,7 @@ async def create(
     )
     await manager.create_room(
         room_name=room_name,
-        player_constructor=arbitrary_player,
+        player_constructor=client_class,
         num_network_players=num_network_players,
         num_random_players=num_random_players,
         num_probabilistic_players=num_probabilistic_players,
@@ -158,7 +159,7 @@ def main(args: argparse.Namespace | None = None) -> int:
             name=args.name,
             ipaddress=args.ipaddress,
             port=args.port,
-            arbitrary_player=args.arbitrary_player,
+            constructor_name=args.arbitrary_player,
         ))
     elif args.subcommand == 'create':
         return asyncio.run(create(
@@ -166,7 +167,7 @@ def main(args: argparse.Namespace | None = None) -> int:
             room_name=args.room_name,
             ipaddress=args.ipaddress,
             port=args.port,
-            arbitrary_player=args.arbitrary_player,
+            client_class=args.client_class,
             num_network_players=args.num_network_players,
             num_random_players=args.num_random_players,
             num_probabilistic_players=args.num_prob_players,

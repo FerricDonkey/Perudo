@@ -56,7 +56,7 @@ def main(args: argparse.Namespace | None = None) -> int:
         for index in range(max(0, args.num_random_players))
     ]
     players.extend(
-        pl.ProbalisticPlayer(
+        pl.ProbabilisticPlayer(
             name=f'Prob-{index}'
         )
         for index in range(max(0, args.num_prob_players))

@@ -601,7 +601,7 @@ class GameManager:
         players: list[pl.PlayerABC] = []
 
         players.extend(
-            pl.ProbalisticPlayer(name=f'ServerLocal-Prob-{index}')
+            pl.ProbabilisticPlayer(name=f'ServerLocal-Prob-{index}')
             for index in range(message.num_probabilistic_players)
         )
 

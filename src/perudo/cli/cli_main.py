@@ -11,7 +11,11 @@ from perudo.cli import local
 from perudo.cli import server
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description='Perudo game CLI')
+    if sys.argv[0].endswith('__main__.py'):
+        sys.argv[0] = 'perudo'
+    parser = argparse.ArgumentParser(
+        description='Perudo game CLI'
+    )
     subparsers = parser.add_subparsers(dest='command', required=True)
 
     dispatch_d: dict[str, ty.Callable[[argparse.Namespace], int]] = {}

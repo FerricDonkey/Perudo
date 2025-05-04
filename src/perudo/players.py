@@ -9,11 +9,69 @@ from perudo import actions, common
 if ty.TYPE_CHECKING:
     from perudo.perudo_game import RoundSummary
 
+type PlayerConstructorType = ty.Callable[[str], 'PlayerABC']
+
 @dataclasses.dataclass(kw_only=True)
 class PlayerABC:
-    type ConstructorType = ty.Callable[[str], 'PlayerABC']
+    NAME_TO_TO_PLAYER_CONSTRUCTOR_D: ty.ClassVar[dict[str, PlayerConstructorType]] = {}
+
     name: str
     cur_dice: collections.Counter[int] = dataclasses.field(default_factory=collections.Counter[int])
+
+    @ty.overload
+    @classmethod
+    def register_constructor[T: PlayerConstructorType | type['PlayerABC']](
+        cls,
+        name_or_constructor: str | None,
+    ) -> ty.Callable[[T], T]:
+        ...
+
+    @ty.overload
+    @classmethod
+    def register_constructor[T: PlayerConstructorType | type['PlayerABC']](
+        cls,
+        name_or_constructor: T,
+    ) -> T:
+        ...
+
+    @classmethod
+    def register_constructor[T: PlayerConstructorType | type['PlayerABC']](
+        cls,
+        name_or_constructor: str | T | None = None,
+    ) -> ty.Callable[[T], T] | T:
+        def inner(constructor: T) -> T:
+            name: str | None
+            error_message = (  # this is defined up here just because type checkers are confused if it's not
+                f'Tried to register {constructor} ({type(constructor).__name__}) '
+                'as a player class, but it is a type and not a subclass of PlayerABC. '
+                'This is not allowed.'
+            )
+            if isinstance(name_or_constructor, str):
+                name = name_or_constructor
+            else:
+                name = getattr(constructor, '__name__', None)
+                if name is None:
+                    raise TypeError(
+                        f'Tried to register {name_or_constructor} ({type(name_or_constructor).__name__}) '
+                        'as a player class, but it has no __name__ attribute. Use '
+                        '@ClientPlayer.register_player_class(name) as a decorator instead, '
+                        'or ClientPlayer.register_player_class(name)(constructor).'
+                    )
+
+            if isinstance(constructor, type):
+                if not issubclass(constructor, PlayerABC):
+                    raise TypeError(error_message)
+
+                cls.NAME_TO_TO_PLAYER_CONSTRUCTOR_D[name] = constructor.from_name
+            else:
+                cls.NAME_TO_TO_PLAYER_CONSTRUCTOR_D[name] = constructor
+
+            return ty.cast(T, constructor)  # this cast wouldn't be necessary if type checkers were smarter.
+
+        if name_or_constructor is None or isinstance(name_or_constructor, str):
+            return inner
+
+        return inner(name_or_constructor)
 
     @property
     def typed_name(self) -> str:
@@ -56,6 +114,17 @@ class PlayerABC:
         """
         pass
 
+    @classmethod
+    def from_constructor(
+        cls,
+        player_name: str,
+        constructor: PlayerConstructorType | str
+    ) -> 'PlayerABC':
+        if isinstance(constructor, str):
+            constructor = cls.NAME_TO_TO_PLAYER_CONSTRUCTOR_D[constructor]
+        return constructor(player_name)
+
+@PlayerABC.register_constructor
 @dataclasses.dataclass(kw_only=True)
 class HumanPlayer(PlayerABC):
     """
@@ -102,6 +171,7 @@ class HumanPlayer(PlayerABC):
         self.cur_dice = dice.copy()  # paranoid aliasing prevention - shouldn't ever matter
 
 
+@PlayerABC.register_constructor
 @dataclasses.dataclass(kw_only=True)
 class RandomLegalPlayer(PlayerABC):
     """
@@ -150,8 +220,9 @@ class RandomLegalPlayer(PlayerABC):
         return actions.Bid(face=face, count=count)
 
 
+@PlayerABC.register_constructor
 @dataclasses.dataclass(kw_only=True)
-class ProbalisticPlayer(PlayerABC):
+class ProbabilisticPlayer(PlayerABC):
     set_dice = RandomLegalPlayer.set_dice
 
     def _get_prob_of_challenge_success(
