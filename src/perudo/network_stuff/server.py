@@ -560,7 +560,7 @@ class GameManager:
         self.game = pg.PerudoGame.from_player_list(
             players=self.players,
             print_while_playing=True,
-            print_non_human_dice=False,
+            print_non_human_dice=True,
         )
 
         self.game_thread = threading.Thread(

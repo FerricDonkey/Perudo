@@ -156,8 +156,7 @@ class PerudoGame:
                 range(common.MIN_FACE_VAL, common.MAX_FACE_VAL),
                 k=num_dice
             ))
-            if num_dice > 0:
-                player.set_dice(dice)
+            player.set_dice(dice)
             self.current_round_dice_by_player.append(dice)
 
         if self.print_while_playing:
@@ -341,7 +340,8 @@ class RoundSummary(common.BaseFrozen):
     players in a network game - but players can react to it as well, if they
     so desire.
     """
-    ordered_players: list[str]
+    all_players: list[str]
+    ordered_living_players: list[str]
     all_player_dice: list[list[int]]
     all_actions: list[actions.Action]
     single_die_round: bool
@@ -353,8 +353,10 @@ class RoundSummary(common.BaseFrozen):
         game: PerudoGame,
         losers: list[pl.PlayerABC],
     ) -> ty.Self:
+        ordered_player_indexes = game.all_rounds_living_players[-1]
         return cls(
-            ordered_players=[game.players[index].name for index in game.all_rounds_living_players[-1]],
+            all_players=[player.name for player in game.players],
+            ordered_living_players=[game.players[index].name for index in ordered_player_indexes],
             all_player_dice=[
                 common.dice_counter_to_list(dice)
                 for dice in game.all_rounds_dice[-1]
@@ -366,13 +368,16 @@ class RoundSummary(common.BaseFrozen):
 
     def print(self) -> None:
         print('===================')
-        for player, dice in zip(self.ordered_players, self.all_player_dice):
-            print(f'  {player}: {dice_to_str(common.dice_list_to_counter(dice))}')
+        for player, dice in zip(self.all_players, self.all_player_dice):
+            if dice:
+                print(f'  {player} ({len(dice)}): {dice_to_str(common.dice_list_to_counter(dice))}')
+            else:
+                print(f'  {player} (0): Dead')
         print('  -----------------')
         action_print_width = len(str(len(self.all_actions)))
-        player_print_width = max(len(player) for player in self.ordered_players)
+        player_print_width = max(len(player) for player in self.all_players)
         for action_index, action in enumerate(self.all_actions):
-            player = self.ordered_players[action_index % len(self.ordered_players)]
+            player = self.ordered_living_players[action_index % len(self.ordered_living_players)]
             print(f'  {action_index:>{action_print_width}} - {player+':':<{player_print_width+1}} {action}')
         print('  -----------------')
         print(f'  Round Loser(s): {", ".join(self.losers)}\n')
@@ -385,6 +390,7 @@ class GameSummary(common.BaseFrozen):
     """
     all_rounds_actions: list[list[actions.Action]]
     all_rounds_dice: list[list[list[int]]]
+    all_players: list[str]
     all_rounds_living_players: list[list[str]]
     all_rounds_losers: list[list[str]]
     single_die_round_history: list[bool]
@@ -402,6 +408,7 @@ class GameSummary(common.BaseFrozen):
                 [common.dice_counter_to_list(dice) for dice in round_dice]
                 for round_dice in game.all_rounds_dice
             ],
+            all_players=[player.name for player in game.players],
             all_rounds_living_players=[
                 [
                     game.players[player_index].name
@@ -441,7 +448,8 @@ class GameSummary(common.BaseFrozen):
             header = f"Round {round_index} ({single_die_round=})"
             print(f'{"-" * len(header)}\n{header}')
             round_summary = RoundSummary(
-                ordered_players=ordered_players,
+                all_players=self.all_players,
+                ordered_living_players=ordered_players,
                 all_player_dice=round_dice,
                 all_actions=round_actions,
                 single_die_round=single_die_round,
