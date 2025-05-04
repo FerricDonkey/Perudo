@@ -178,7 +178,7 @@ class ClientManager:
     async def ping(self) -> bool:
         return await self.connection.ping()
 
-    async def get_room_list(self,) -> None:
+    async def get_room_list(self) -> None:
         await self.send_obj(messaging.RequestRoomList())
         room_list_response = await self.receive_obj()
         if not isinstance(room_list_response, messaging.HereRoomsList):

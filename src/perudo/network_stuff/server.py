@@ -89,12 +89,12 @@ class Server(_DummyServer):
     room_name_to_game_manager_d: dict[str, 'GameManager'] = dataclasses.field(default_factory=dict[str, 'GameManager'])
     name_to_connection_d: dict[str, nc.Connection] = dataclasses.field(default_factory=dict[str, nc.Connection])
 
-    max_players_per_game: int = 100
-    max_concurrent_games: int = 100
+    max_players_per_game: int = nc.DEFAULT_MAX_PLAYERS_PER_GAME
+    max_concurrent_games: int = nc.DEFAULT_MAX_GAMES_PER_SERVER
 
     is_alive: bool = True
 
-    port: int = 1337
+    port: int = nc.DEFAULT_SERVER_PORT
     private_key: ed25519.Ed25519PrivateKey = dataclasses.field(default_factory=ed25519.Ed25519PrivateKey.generate)
     _asyncio_loop: asyncio.AbstractEventLoop = dataclasses.field(default_factory=asyncio.new_event_loop)
 
@@ -201,7 +201,7 @@ class Server(_DummyServer):
             self.name_to_connection_d[connection.name] = connection
             message_obj = await connection.receive_obj()
             handler = self.MESSAGE_TYPE_TO_HANDLER_D[type(message_obj)]
-            await handler(connection, message_obj)
+            await handler(self, connection, message_obj)
         except Exception as exc:
             error_message = (
                 f"Error in handling client {connection.name}: {type(exc).__name__} - "

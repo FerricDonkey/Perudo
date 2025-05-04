@@ -64,6 +64,55 @@ def get_random_non_wild_face() -> int:
         face = get_random_face()
     return face
 
+# pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false
+def _is_instance_of_typehint(obj: object, hint: ty.Any) -> bool:
+    """
+    check if object is of type hint.
+
+    pyright is silenced for a lot of this function, because the whole point of
+    this function is to determine if there are any problems with the types at
+    run time, and pyright will just complain uselessly unless I add a lot of
+    useless type ignore comments or ty.Any or similar.
+
+    What this function is telling me is that I should have used pydantic.
+    """
+    origin = ty.get_origin(hint)
+    args = ty.get_args(hint)
+
+    if origin is None:
+        return isinstance(obj, hint)
+
+    if origin is list:
+        return (
+            isinstance(obj, list)
+            and all(_is_instance_of_typehint(item, args[0]) for item in obj)
+        )
+
+    # Add support for more container types as needed
+    if origin is dict:
+        key_type, val_type = args
+        return (
+            isinstance(obj, dict)
+            and all(
+            _is_instance_of_typehint(k, key_type) and _is_instance_of_typehint(v, val_type)
+            for k, v in obj.items()
+            )
+        )
+    if origin is collections.Counter:
+        key_type = args[0]
+        return (
+            isinstance(obj, collections.Counter)
+            and all(
+                _is_instance_of_typehint(key, key_type)
+                for key in obj.keys()
+            )
+        )
+
+    if origin is ty.Union:
+        return any(_is_instance_of_typehint(obj, arg) for arg in args)
+
+    raise TypeError(f"Unsupported type hint: {hint}")
+
 @dataclasses.dataclass(frozen=True)
 class BaseFrozen:
     """
@@ -80,14 +129,7 @@ class BaseFrozen:
         errors: list[str] = []
         for field in dataclasses.fields(self):
             value = getattr(self, field.name)
-            if not isinstance(field.type, type):
-                raise TypeError(
-                    f"{field.name} of {type(self).__name__} is not a runtime "
-                    "type - this probably means you used a string or similar "
-                    "as the type hint, which is not allowed. (If it needs to "
-                    "be, this code can be relaxed.)"
-                )
-            if not isinstance(value, field.type):
+            if not _is_instance_of_typehint(value, field.type):
                 errors.append(
                     f'Field {field.name} expected type {field.type}, but got '
                     f'object {value} of type {type(value)}.'

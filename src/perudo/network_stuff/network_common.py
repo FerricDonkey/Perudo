@@ -9,6 +9,9 @@ from perudo.network_stuff import messaging
 
 from cryptography.hazmat.primitives.asymmetric import ed25519
 
+DEFAULT_SERVER_PORT: int = 1337
+DEFAULT_MAX_PLAYERS_PER_GAME: int = 100
+DEFAULT_MAX_GAMES_PER_SERVER: int = 100
 
 @dataclasses.dataclass(frozen=True)
 class Connection:
@@ -44,7 +47,7 @@ class Connection:
         name: str,
     ) -> ty.Self:
         incoming_handshake = await cls._receive_wrapped_message(reader=reader)
-        if not isinstance(incoming_handshake.data, messaging.ToServerHandshake):
+        if not isinstance(incoming_handshake.data, messaging.FromServerHandshake):
             raise common.ConstructionError(f"Expected wrapped handshake, but got {incoming_handshake}")
 
         target_public_key = incoming_handshake.public_key

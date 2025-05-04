@@ -1,4 +1,6 @@
-from perudo import perudo_game as pg
+import sys
+
+from perudo.cli import cli_main
 
 if __name__ == "__main__":
-    pg.local_main()
+    sys.exit(cli_main.main())
