@@ -3,16 +3,17 @@ import collections
 import dataclasses
 import math
 import random
-import typing
+import typing as ty
 
 from perudo import actions, common
-
+if ty.TYPE_CHECKING:
+    from perudo.perudo_game import RoundSummary
 
 @dataclasses.dataclass(kw_only=True)
 class PlayerABC:
+    type ConstructorType = ty.Callable[[str], 'PlayerABC']
     name: str
     cur_dice: collections.Counter[int] = dataclasses.field(default_factory=collections.Counter[int])
-    #action_histories: list[list[Action]] = dataclasses.field(default_factory=list)
 
     @property
     def typed_name(self) -> str:
@@ -37,6 +38,23 @@ class PlayerABC:
         """
         raise NotImplementedError('Implement me bro')
 
+    @classmethod
+    def from_name(cls, name: str) -> ty.Self:
+        """
+        This factory method is dumb, but it simplifies type checking in the
+        ClientPlayer class
+        """
+        return cls(name=name)
+
+    def react_to_round_summary(
+        self,
+        round_summary: 'RoundSummary',
+    ) -> None:
+        """
+        This method is here so that subclasses can use it if they want -
+        but the few provided defaults don't.
+        """
+        pass
 
 @dataclasses.dataclass(kw_only=True)
 class HumanPlayer(PlayerABC):
@@ -252,7 +270,7 @@ class ProbalisticPlayer(PlayerABC):
 
         # For bids, the expected value is calculated assuming the next player
         # challenges
-        allowed_faces: typing.Iterable[int]
+        allowed_faces: ty.Iterable[int]
         if is_single_die_round:
             allowed_faces = (previous_bid.face,)
         else:

@@ -331,7 +331,7 @@ class RemotePlayer(pl.PlayerABC):
         )
         return future.result(timeout=self.TIMEOUT)
 
-    def send_round_summary(self, round_summary: pg.RoundSummary) -> None:
+    def react_to_round_summary(self, round_summary: pg.RoundSummary) -> None:
         self._async_do(self.connection.send_obj(round_summary))
 
     def send_game_summary(self, game_summary: pg.GameSummary) -> None:
@@ -517,19 +517,8 @@ class GameManager:
         """
         assert self.game is not None, "Game not started yet"
         self.game.main_loop(
-            round_end_callback=self._broadcast_round_end_cb,
             game_end_callback=self._broadcast_winner_cb,
         )
-
-    def _broadcast_round_end_cb(self, losers: list[pl.PlayerABC]) -> None:
-        assert self.game is not None, "Game not started yet"
-        round_summary = pg.RoundSummary.from_game_losers(
-            game=self.game,
-            losers=losers,
-        )
-        for player in self.players:
-            if isinstance(player, RemotePlayer):
-                player.send_round_summary(round_summary=round_summary)
 
     def _broadcast_winner_cb(self, winner: pl.PlayerABC) -> None:
         assert self.game is not None, "Game not started yet"

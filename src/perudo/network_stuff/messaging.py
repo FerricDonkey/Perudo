@@ -232,6 +232,13 @@ class SetDice(common.BaseFrozen):
 class HereRoomsList(common.BaseFrozen):
     room_to_members: dict[str, list[str]]
 
+    def print(self) -> None:
+        for room, members in self.room_to_members.items():
+            print(f'Room: {room}')
+            for member in members:
+                print(f'  {member}')
+            print()
+
 ### General Use Messages: FROM CLIENT TO SERVER
 @WrappedMessage.register_type
 @dataclasses.dataclass(frozen=True)
@@ -251,7 +258,7 @@ class CreateRoom(common.BaseFrozen):
     num_random_players: int
     num_probabilistic_players: int
 
-    def check_for_errors(self, max_num_players: int) -> str | None:
+    def check_for_errors(self, max_num_players: float = float('inf')) -> str | None:
         if self.num_network_players <= 0:
             return "Must have at least one network player"
         elif self.num_random_players < 0:

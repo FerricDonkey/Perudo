@@ -179,7 +179,6 @@ class PerudoGame:
     def end_round(
         self,
         loser_indexes: ty.Collection[int],
-        round_end_callback: ty.Callable[[list[pl.PlayerABC]], None] | None = None,
     ) -> bool:
         """
         End this round, start a new one IF anyone survived.
@@ -192,7 +191,6 @@ class PerudoGame:
             self.player_index_to_num_dice[index] = max(0, self.player_index_to_num_dice[index] - 1)
 
         # Start a new round if multiple people are still alive
-        is_game_continuing = False
         if sum(num > 0 for num in self.player_index_to_num_dice) > 1:
             losers_with_dice = [
                 index for index in loser_indexes
@@ -210,21 +208,30 @@ class PerudoGame:
                 single_die_round = True
             else:
                 single_die_round = False
+
+            round_summary = RoundSummary.from_game_losers(
+                game=self,
+                losers=[self.players[index] for index in loser_indexes],
+            )
+            for player in self.players:
+                player.react_to_round_summary(round_summary)
+
             self.start_new_round(
                 first_player_index=next_player,
                 single_die_round=single_die_round,
             )
-            is_game_continuing = True
+            return True  # game is continuing
 
-        if round_end_callback is not None:
-            round_end_callback([self.players[loser_index] for loser_index in loser_indexes])
+        # Game is not continuing
+        round_summary = RoundSummary.from_game_losers(
+            game=self,
+            losers=[self.players[index] for index in loser_indexes],
+        )
+        for player in self.players:
+            player.react_to_round_summary(round_summary)
+        return False
 
-        return is_game_continuing
-
-    def take_turn(
-        self,
-        round_end_callback: ty.Callable[[list[pl.PlayerABC]], None] | None = None,
-    ) -> bool:
+    def take_turn(self,) -> bool:
         """
         returns True if the game continues, False if not
         """
@@ -274,10 +281,7 @@ class PerudoGame:
             if self.print_while_playing:
                 print(f'Loser(s): {", ".join(self.players[loser].typed_name for loser in losers)}')
 
-            return self.end_round(
-                loser_indexes=losers,
-                round_end_callback=round_end_callback,
-            )
+            return self.end_round(loser_indexes=losers,)
 
         self.cur_player_index = self.next_living_player_index
         return True
@@ -310,13 +314,11 @@ class PerudoGame:
 
     def main_loop(
         self,
-        round_end_callback: ty.Callable[[list[pl.PlayerABC]], None] | None = None,
         game_end_callback: ty.Callable[[pl.PlayerABC], None] | None = None,
     ) -> int:
         """
         Suitable for running the game purely locally
 
-        :param round_end_callback: Function called at end of each round with list of losing players
         :param game_end_callback: Function called at game end with winning player
         :return: winning player index
         """
@@ -325,7 +327,7 @@ class PerudoGame:
             first_player_index=first_player_index,
             single_die_round=False,  # Assuming we're not being weird.
         )
-        while self.take_turn(round_end_callback=round_end_callback):
+        while self.take_turn():
             pass
 
         # self.cur_player_index is the winner
@@ -338,8 +340,9 @@ class PerudoGame:
 @dataclasses.dataclass(frozen=True)
 class RoundSummary(common.BaseFrozen):
     """
-    Note that this class primarily exists so that it can be sent over the
-    network via standard send_obj methods.
+    This class is also a message that will be sent over the network to client
+    players in a network game - but players can react to it as well, if they
+    so desire.
     """
     ordered_players: list[str]
     all_player_dice: list[collections.Counter[int]]
