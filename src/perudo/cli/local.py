@@ -5,6 +5,7 @@ can be run directly, or through cli_main.py or __main__.py
 """
 
 import argparse
+import collections
 import sys
 
 from perudo.cli import cli_common as cc
@@ -20,6 +21,16 @@ def make_parser(parser: argparse.ArgumentParser | None=None) -> argparse.Argumen
 
     cc.add_n_random_arg(parser)
     cc.add_n_prob_arg(parser)
+
+    parser.add_argument(
+        '--arbitrary-players', '--ap',
+        type=str,
+        dest='arbitrary_player_classes',
+        choices=sorted(pl.PlayerABC.NAME_TO_TO_PLAYER_CONSTRUCTOR_D.keys()),
+        default=[],
+        nargs='+',
+        help='Names of human players to add to the game'
+    )
 
     parser.add_argument(
         '--humans',
@@ -67,8 +78,23 @@ def main(args: argparse.Namespace | None = None) -> int:
             for human_name in args.human_names
         )
     )
+
+    arbitrary_class_counts: collections.Counter[str] = collections.Counter(args.arbitrary_player_classes)
+    for player_class, count in arbitrary_class_counts.items():
+        players.extend(
+            pl.PlayerABC.from_constructor(
+                player_name=f'Arb-{player_class}-{index}',
+                constructor=player_class,
+            )
+            for index in range(count)
+        )
+
     if len(players) < 2:
         print("Need at least 2 players")
+        return 1
+
+    if len({player.name for player in players}) != len(players):
+        print("Player names must be unique")
         return 1
 
     game = pg.PerudoGame.from_player_list(
