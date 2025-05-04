@@ -97,12 +97,11 @@ class ClientPlayer:
         """
         while True:
             message = await self.connection.receive_obj()
-            if isinstance(message, messaging.Error):
+            if isinstance(message, (messaging.Error, messaging.Corrupted)):
                 print(message.contents)
                 return
-            elif isinstance(message, messaging.Corrupted):
-                print(message.contents)
-                return
+            elif isinstance(message, messaging.NoOp):
+                pass
             elif isinstance(message, messaging.SetDice):
                 print(f"Player {self.player.name} set dice to {message.dice}")
                 self.player.set_dice(message.dice)
@@ -226,10 +225,8 @@ class ClientManager:
             await self.close()
             raise common.ConstructionError(error)
 
-        await asyncio.gather(
-            player.run_game_loop(),
-            self.send_obj(create_message)
-        )
+        await self.send_obj(create_message)
+        await player.run_game_loop()
 
 ClientPlayer.register_player_class(pl.HumanPlayer)
 ClientPlayer.register_player_class(pl.ProbalisticPlayer)

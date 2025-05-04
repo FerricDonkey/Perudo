@@ -14,6 +14,7 @@ import inspect
 import random
 import socket
 import threading
+import time
 import typing as ty
 
 from perudo.network_stuff import messaging
@@ -110,7 +111,7 @@ class Server(_DummyServer):
 
     async def _purge_disconnected(self) -> None:
         while self.is_alive:
-            for _ in range(30):
+            for _ in range(10):  # do soft connection checks 10 times, then active connection checks once
                 await asyncio.sleep(1)
                 for name, connection in list(self.name_to_connection_d.items()):
                     if connection.is_closing():
@@ -203,7 +204,7 @@ class Server(_DummyServer):
                 try:
                     await writer.wait_closed()
                 except (ConnectionResetError, ConnectionAbortedError, OSError) as exc:
-                    print(f"Socket closed with error: {common.exception_to_str(exc)}")                
+                    print(f"Socket closed with error: {common.exception_to_str(exc)}")
                 return
 
             connection = await nc.Connection.from_handshake_server_side(
@@ -217,7 +218,7 @@ class Server(_DummyServer):
             try:
                 await writer.wait_closed()
             except (ConnectionResetError, ConnectionAbortedError, OSError) as exc:
-                print(f"Socket closed with error: {common.exception_to_str(exc)}")            
+                print(f"Socket closed with error: {common.exception_to_str(exc)}")
             return
 
         # Dispatch to handler based on first message.
@@ -412,6 +413,20 @@ class GameManager:
     game_thread: threading.Thread | None = None
     is_alive: bool = True
 
+    @property
+    def num_network_players(self) -> int:
+        return sum(
+            isinstance(player, RemotePlayer) and not player.is_closing()
+            for player in self.players
+        )
+
+    @property
+    def num_active_players(self) -> int:
+        return sum(
+            not isinstance(player, RemotePlayer) or not player.is_closing()
+            for player in self.players
+        )
+
     async def add_player_from_connection(
         self,
         connection: nc.Connection,
@@ -460,9 +475,18 @@ class GameManager:
         async def always_true() -> bool:
             return True
 
+        last_print_time = float('-inf')
         while len(self.players) < self.num_players:
             # This checks if any players are closing (explicitly disconnected already)
             while len(self.players) < self.num_players:
+                if not self.num_network_players:
+                    return
+                if time.time() - last_print_time > 5:
+                    print(
+                        f'GameManager {self.room_name}: Waiting for {self.num_players} '
+                        f'players to join game {self.room_name}, have {len(self.players)}'
+                    )
+                    last_print_time = time.time()
                 player_indexes_to_remove: list[int] = []
                 for index, player in enumerate(self.players):
                     if isinstance(player, RemotePlayer) and player.is_closing():
@@ -470,7 +494,7 @@ class GameManager:
                 if player_indexes_to_remove:
                     for index in reversed(player_indexes_to_remove):
                         del self.players[index]
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(1)
 
             # If we think we have enough players, do one final check to make
             # sure they all respond to ping
@@ -503,6 +527,10 @@ class GameManager:
         boot
         """
         await self._wait_until_full()
+        # If all of our network players disconnected, or there's only 1 active
+        # (network or non-network) player, then we can't start the game
+        if not self.num_network_players or self.num_active_players < 2:
+            return
 
         for player in self.players[self.num_players:]:
             if isinstance(player, RemotePlayer):
@@ -563,8 +591,8 @@ class GameManager:
         )
 
         players.extend(
-            pl.ProbalisticPlayer(name=f'ServerLocal-Rando-{index}')
-            for index in range(message.num_probabilistic_players)
+            pl.RandomLegalPlayer(name=f'ServerLocal-Rando-{index}')
+            for index in range(message.num_random_players)
         )
 
         players.append(RemotePlayer(

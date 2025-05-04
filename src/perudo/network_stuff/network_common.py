@@ -18,7 +18,8 @@ class Connection:
     LEN_PREFIX_FORMAT: ty.ClassVar[str] = '!I'
     LEN_PREFIX_LEN: ty.ClassVar[int] = 4
     MAX_MESSAGE_LEN: ty.ClassVar[int] = 10_000_000
-    TIMEOUT: ty.ClassVar[int] = 10
+    SEND_TIMEOUT: ty.ClassVar[int] = 10
+    RECV_TIMEOUT: ty.ClassVar[float] = float('inf')  # Need heartbeats to set this to be finite (or something)
 
     name: str
     _reader: asyncio.StreamReader
@@ -103,7 +104,7 @@ class Connection:
                 raise common.ConstructionError(f"Message too long: {len(wrapped)} > {cls.MAX_MESSAGE_LEN}")
             to_send = struct.pack(cls.LEN_PREFIX_FORMAT, len(wrapped)) + wrapped
             writer.write(to_send)
-            await asyncio.wait_for(writer.drain(), timeout=cls.TIMEOUT)
+            await asyncio.wait_for(writer.drain(), timeout=cls.SEND_TIMEOUT)
 
         except Exception as exc:
             print(f"Send failed: {common.exception_to_str(exc)}")
@@ -133,11 +134,11 @@ class Connection:
         outside of the handshake, then an additional regular method should be
         added to handle that and also confirm the public key.
         """
-        len_bytes = await asyncio.wait_for(reader.readexactly(cls.LEN_PREFIX_LEN), timeout=cls.TIMEOUT)
+        len_bytes = await asyncio.wait_for(reader.readexactly(cls.LEN_PREFIX_LEN), timeout=cls.RECV_TIMEOUT)
         wrapped_len = struct.unpack(cls.LEN_PREFIX_FORMAT, len_bytes)[0]
         if wrapped_len > cls.MAX_MESSAGE_LEN:
             raise common.ConstructionError(f"Message too long: {wrapped_len} > {cls.MAX_MESSAGE_LEN}")
-        wrapped = await asyncio.wait_for(reader.readexactly(wrapped_len), timeout=float('inf'))
+        wrapped = await asyncio.wait_for(reader.readexactly(wrapped_len), timeout=cls.RECV_TIMEOUT)
         return messaging.WrappedMessage.from_bytes(wrapped)
 
     async def send_obj(self, obj: common.BaseFrozen) -> None:
