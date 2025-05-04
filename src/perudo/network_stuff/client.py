@@ -98,10 +98,10 @@ class ClientPlayer:
         while True:
             message = await self.connection.receive_obj()
             if isinstance(message, messaging.Error):
-                print(message.error_message)
+                print(message.contents)
                 return
             elif isinstance(message, messaging.Corrupted):
-                print(message.details)
+                print(message.contents)
                 return
             elif isinstance(message, messaging.SetDice):
                 print(f"Player {self.player.name} set dice to {message.dice}")
@@ -181,9 +181,11 @@ class ClientManager:
     async def get_room_list(self) -> None:
         await self.send_obj(messaging.RequestRoomList())
         room_list_response = await self.receive_obj()
-        if not isinstance(room_list_response, messaging.HereRoomsList):
+        if not isinstance(room_list_response, messaging.RoomsListResponse):
             await self.close()
-            raise common.ConstructionError(f"Expected room list, but got {room_list_response}")
+            if isinstance(room_list_response, (messaging.Corrupted, messaging.Error,)):
+                print(room_list_response.contents)
+            raise common.ConstructionError(f"Expected room list, but got {type(room_list_response).__name__}")
         room_list_response.print()
 
     async def join_room(

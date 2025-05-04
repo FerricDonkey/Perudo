@@ -115,6 +115,19 @@ class Server(_DummyServer):
                 for name, connection in list(self.name_to_connection_d.items()):
                     if connection.is_closing():
                         del self.name_to_connection_d[name]
+                        print(f'-- Purged disconnected player {name}')
+
+                for name, game_manager in list(self.room_name_to_game_manager_d.items()):
+                    if (
+                        not game_manager.is_alive
+                        or not any(
+                            isinstance(player, RemotePlayer)
+                            and not player.is_closing()
+                            for player in game_manager.players
+                        )
+                    ):
+                        del self.room_name_to_game_manager_d[name]
+                        print(f'-- Purged disconnected game {name}')
 
             names = list(self.name_to_connection_d.keys())
             players = (self.name_to_connection_d[name] for name in names)
@@ -122,6 +135,7 @@ class Server(_DummyServer):
             for name, is_connected in zip(names, still_connected):
                 if not is_connected:
                     del self.name_to_connection_d[name]
+                    print(f'-- Active purged disconnected player {name}')
 
     async def start_server(self) -> None:
         """
@@ -162,8 +176,12 @@ class Server(_DummyServer):
         try:
             yield server
         finally:
+            self.is_alive = False
             server.close()
-            await server.wait_closed()
+            try:
+                await server.wait_closed()
+            except Exception as exc:
+                print(f"Server closed with error: {common.exception_to_str(exc)}")
 
     async def _handle_client(
         self,
@@ -178,22 +196,28 @@ class Server(_DummyServer):
         the handlers that need the connection alive until some condition is met
         do not return until then
         """
-        if not self.is_alive:
-            print("-- Received connection, but server is dead - closing.")
-            writer.close()
-            await writer.wait_closed()
-            return
-
         try:
+            if not self.is_alive:
+                print("-- Received connection, but server is dead - closing.")
+                writer.close()
+                try:
+                    await writer.wait_closed()
+                except (ConnectionResetError, ConnectionAbortedError, OSError) as exc:
+                    print(f"Socket closed with error: {common.exception_to_str(exc)}")                
+                return
+
             connection = await nc.Connection.from_handshake_server_side(
                 reader=reader,
                 writer=writer,
                 self_private_key=self.private_key,
             )
         except Exception as exc:
-            print(f"Error in handling client: {exc}")
+            print(f"Error in handling client: {common.exception_to_str(exc)}")
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            except (ConnectionResetError, ConnectionAbortedError, OSError) as exc:
+                print(f"Socket closed with error: {common.exception_to_str(exc)}")            
             return
 
         # Dispatch to handler based on first message.
@@ -204,18 +228,16 @@ class Server(_DummyServer):
             await handler(self, connection, message_obj)
         except Exception as exc:
             error_message = (
-                f"Error in handling client {connection.name}: {type(exc).__name__} - "
-                + ", ".join(map(str, exc.args))
+                f"Error in handling client {connection.name}: {common.exception_to_str(exc)}"
             )
             print('>>>>>', error_message)
             try:
                 await connection.send_obj(
-                    obj=messaging.Error(error_message=error_message),
+                    obj=messaging.Error(contents=error_message),
                 )
             except Exception as exc2:
                 print(
-                    f">>>>> Error in sending error message {connection.name}: {type(exc2).__name__} - "
-                    + ", ".join(map(str, exc2.args))
+                    f">>>>> Error in sending error message {connection.name}: {common.exception_to_str(exc2)} - "
                 )
         finally:
             await connection.close()
@@ -223,7 +245,7 @@ class Server(_DummyServer):
     @_register_handler
     async def _handle_request_room_list(self, connection: nc.Connection, _message: messaging.RequestRoomList) -> None:
         await connection.send_obj(
-            messaging.HereRoomsList(
+            messaging.RoomsListResponse(
                 room_to_members={
                     room_name: sorted(
                         player.name for player in game_manager.players
@@ -239,7 +261,7 @@ class Server(_DummyServer):
         if room_name in self.room_name_to_game_manager_d:
             error_message = f"Rejected: Room {room_name} already exists"
             await connection.send_obj(
-                messaging.Error(error_message=error_message)
+                messaging.Error(contents=error_message)
             )
             print(">>>>", error_message)
             await connection.close()
@@ -248,7 +270,7 @@ class Server(_DummyServer):
         validation_error = message.check_for_errors(max_num_players=self.max_players_per_game)
         if validation_error:
             await connection.send_obj(
-                messaging.Error(error_message=validation_error)
+                messaging.Error(contents=validation_error)
             )
             print(">>>>", validation_error)
             await connection.close()
@@ -270,7 +292,7 @@ class Server(_DummyServer):
             if not rooms_with_space:
                 error_message = "Rejected: No rooms with space"
                 await connection.send_obj(
-                    messaging.Error(error_message=error_message)
+                    messaging.Error(contents=error_message)
                 )
                 print(">>>>", error_message)
                 await connection.close()
@@ -281,7 +303,7 @@ class Server(_DummyServer):
         elif room_name not in self.room_name_to_game_manager_d:
             error_message = f"Rejected: Room {room_name} does not exist"
             await connection.send_obj(
-                messaging.Error(error_message=error_message)
+                messaging.Error(contents=error_message)
             )
             print(">>>>", error_message)
             await connection.close()
@@ -362,7 +384,7 @@ class RemotePlayer(pl.PlayerABC):
         except Exception as exc:
             return actions.InvalidAction(
                 attempted_action=None,
-                reason=f"Error communicating with {self.connection.name}: {exc}",
+                reason=f"Error communicating with {self.connection.name}: {common.exception_to_str(exc)}",
             )
 
     def set_dice(
@@ -376,7 +398,7 @@ class RemotePlayer(pl.PlayerABC):
         except Exception as exc:
             # TODO: Disconnect maybe, and give opportunity to reconnect?
             print(
-                f">>> Error communicating with {self.connection.name}: {exc}. " 
+                f">>> Error communicating with {self.connection.name}: {common.exception_to_str(exc)}. " 
                 "Player may not have received dice update."
             )
 
@@ -414,7 +436,7 @@ class GameManager:
         if new_player.name in (player.name for player in self.players):
             error_msg = f"Rejected: Player {new_player.name} already in game"
             await connection.send_obj(
-                messaging.Error(error_message=error_msg)
+                messaging.Error(contents=error_msg)
             )
             print(">>>>", error_msg)
             return None
@@ -422,7 +444,7 @@ class GameManager:
         if len(self.players) >= self.num_players:
             error_msg = f"Rejected: Game is full"
             await connection.send_obj(
-                messaging.Error(error_message=error_msg)
+                messaging.Error(contents=error_msg)
             )
             print(">>>>", error_msg)
             return None
@@ -452,7 +474,6 @@ class GameManager:
 
             # If we think we have enough players, do one final check to make
             # sure they all respond to ping
-            # TODO this can be asyncified, probably
             tasks = (
                 (
                     player.ping() if isinstance(player, RemotePlayer)
@@ -487,7 +508,7 @@ class GameManager:
             if isinstance(player, RemotePlayer):
                 error_msg = f"Rejected: Somehow more players than expected"
                 await player.connection.send_obj(
-                    messaging.Error(error_message=error_msg)
+                    messaging.Error(contents=error_msg)
                 )
                 print(">>>>", error_msg)
                 await player.connection.close()
@@ -495,7 +516,7 @@ class GameManager:
         self.players = self.players[:self.num_players]
         self.game = pg.PerudoGame.from_player_list(
             players=self.players,
-            print_while_playing=False,
+            print_while_playing=True,
             print_non_human_dice=False,
         )
 

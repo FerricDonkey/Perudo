@@ -5,6 +5,7 @@ import collections
 import dataclasses
 import json
 import random
+import traceback
 import typing as ty
 
 WILD_FACE_VAL = 1
@@ -19,6 +20,9 @@ assert WILD_FACE_VAL == MIN_FACE_VAL, "Wild card must be first"  # TODO fix bid 
 
 def validate_face(face: int) -> bool:
     return MIN_FACE_VAL <= face <= MAX_FACE_VAL
+
+def exception_to_str(exception: Exception) -> str:
+    return ''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))
 
 
 class ConstructionError(Exception):
@@ -119,7 +123,9 @@ class BaseFrozen:
     Represents a base frozen dataclass with type validation and utility methods for
     serialization and deserialization.
 
-    NOTE: Type hints must be types, not strs.
+    NOTE: Type hints must work with _is_instance_of_typehint.
+
+    I really should have used pydantic for this.
 
     This immutable dataclass validates the types of its attributes upon initialization.
     It provides methods to create an instance from a dictionary or a JSON string and
@@ -157,24 +163,21 @@ class BaseFrozen:
                     continue
 
                 FieldType = field_name_to_type_d[field_name]
-                if not isinstance(FieldType, type):
-                    raise TypeError(  # this is not a ConstructionError because it's a bug, not bad input
-                        f"{field_name} of {cls.__name__} is not a runtime "
-                        "type - this probably means you used a string or similar "
-                        "as the type hint, which is not allowed. (If it needs to "
-                        "be, this code can be relaxed.)"
-                    )
-
-                if issubclass(FieldType, BaseFrozen):
+                if isinstance(FieldType, type) and issubclass(FieldType, BaseFrozen):
                     kwargs[field_name] = FieldType.from_dict(value)
                 elif (
                     FieldType is collections.Counter
                     and isinstance(value, dict)
                 ):
-                    value = collections.Counter(ty.cast(dict[int, int], value))
+                    value = collections.Counter(ty.cast(dict[object, int], value))
+                    if not _is_instance_of_typehint(value, FieldType):
+                        errors.append(
+                            f"Field {field_name} in input_d to {cls.__name__} expected "
+                            f"type {FieldType}, but got object {value} of type {type(value)}."
+                        )
                     kwargs[field_name] = value
 
-                elif not isinstance(value, FieldType):
+                elif not _is_instance_of_typehint(value, FieldType):
                     errors.append(
                         f"Field {field_name} in input_d to {cls.__name__} expected "
                         f"type {FieldType}, but got object {value} of type {type(value)}."

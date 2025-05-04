@@ -28,7 +28,10 @@ class Connection:
 
     async def close(self) -> None:
         self._writer.close()
-        await self._writer.wait_closed()
+        try:
+            await self._writer.wait_closed()
+        except (ConnectionResetError, ConnectionAbortedError, OSError) as exc:
+            print(f"Socket closed with error: {common.exception_to_str(exc)}")
 
     @functools.cached_property
     def ipaddress(self) -> str:
@@ -103,9 +106,12 @@ class Connection:
             await asyncio.wait_for(writer.drain(), timeout=cls.TIMEOUT)
 
         except Exception as exc:
-            print(f"Send failed: {type(exc).__name__}: {", ".join(map(str, exc.args))}")
+            print(f"Send failed: {common.exception_to_str(exc)}")
             writer.close()
-            await writer.wait_closed()
+            try:
+                await writer.wait_closed()
+            except (ConnectionResetError, ConnectionAbortedError, OSError) as exc:
+                print(f"Socket closed with error: {common.exception_to_str(exc)}")
 
     @classmethod
     async def _receive_wrapped_message(
@@ -131,10 +137,11 @@ class Connection:
         wrapped_len = struct.unpack(cls.LEN_PREFIX_FORMAT, len_bytes)[0]
         if wrapped_len > cls.MAX_MESSAGE_LEN:
             raise common.ConstructionError(f"Message too long: {wrapped_len} > {cls.MAX_MESSAGE_LEN}")
-        wrapped = await asyncio.wait_for(reader.readexactly(wrapped_len), timeout=cls.TIMEOUT)
+        wrapped = await asyncio.wait_for(reader.readexactly(wrapped_len), timeout=float('inf'))
         return messaging.WrappedMessage.from_bytes(wrapped)
 
     async def send_obj(self, obj: common.BaseFrozen) -> None:
+        print(f"-- send {obj}")
         await self._send_wrapped_message(
             message=messaging.WrappedMessage.from_data(obj, self._self_private_key),
             writer=self._writer,
@@ -145,16 +152,16 @@ class Connection:
             wrapped = await self._receive_wrapped_message(reader=self._reader)
         except Exception as exc:
             await self.close()
-            error_message = f"Receive failed: {type(exc).__name__}: {', '.join(map(str, exc.args))}"
+            error_message = f"Receive failed: {common.exception_to_str(exc)}"
             print('>>>>>', error_message)
-            return messaging.Corrupted(details=error_message)
+            return messaging.Corrupted(contents=error_message)
 
         if wrapped.public_key != self._target_public_key:
             await self.close()
             error_message = f"Public key mismatch: {wrapped.public_key} != {self._target_public_key}"
             print('>>>>>', error_message)
-            return messaging.Corrupted(details=error_message)
-
+            return messaging.Corrupted(contents=error_message)
+        print(f"-- recv {wrapped.data}")
         return wrapped.data
 
     async def ping(self) -> bool:

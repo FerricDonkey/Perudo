@@ -167,7 +167,7 @@ class WrappedMessage:
 @WrappedMessage.register_type
 @dataclasses.dataclass(frozen=True)
 class Error(common.BaseFrozen):
-    error_message: str
+    contents: str
 
 
 # Kinda gross-ish, but I'm doing this to keep the base game not caring about
@@ -203,7 +203,7 @@ class Corrupted(common.BaseFrozen):
     """
     Exists so something can be returned on reception of a corrupted message.
     """
-    details: ty.Any
+    contents: object
 
 ### General Use Messages: FROM SERVER TO CLIENT
 @WrappedMessage.register_type
@@ -229,10 +229,13 @@ class SetDice(common.BaseFrozen):
 
 @WrappedMessage.register_type
 @dataclasses.dataclass(frozen=True)
-class HereRoomsList(common.BaseFrozen):
+class RoomsListResponse(common.BaseFrozen):
     room_to_members: dict[str, list[str]]
 
     def print(self) -> None:
+        if not self.room_to_members:
+            print("No rooms")
+            return
         for room, members in self.room_to_members.items():
             print(f'Room: {room}')
             for member in members:
