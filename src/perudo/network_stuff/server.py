@@ -38,7 +38,7 @@ class _DummyServer(abc.ABC, metaclass=abc.ABCMeta):
     """
     MESSAGE_TYPE_TO_HANDLER_D: ty.ClassVar[dict[
         type[common.BaseFrozen],
-        ty.Callable[[nc.Connection, common.BaseFrozen], ty.Awaitable[None]]
+        ty.Callable[[ty.Any, nc.Connection, common.BaseFrozen], ty.Awaitable[None]]
     ]] = {}
 
     @staticmethod
@@ -84,7 +84,7 @@ class _DummyServer(abc.ABC, metaclass=abc.ABCMeta):
 class Server(_DummyServer):
     MESSAGE_TYPE_TO_HANDLER_D: ty.ClassVar[dict[
         type[common.BaseFrozen],
-        ty.Callable[[nc.Connection, common.BaseFrozen], ty.Awaitable[None]]
+        ty.Callable[['Server', nc.Connection, common.BaseFrozen], ty.Awaitable[None]]
     ]] = {}
 
     room_name_to_game_manager_d: dict[str, 'GameManager'] = dataclasses.field(default_factory=dict[str, 'GameManager'])
@@ -107,7 +107,7 @@ class Server(_DummyServer):
 
     @functools.cached_property
     def _async_thread(self) -> threading.Thread:
-        return threading.Thread(target=self._asyncio_loop.run_until_complete, args=(self.start_server(),))
+        return threading.Thread(target=self._asyncio_loop.run_until_complete, args=(self._start_server(),))
 
     async def _purge_disconnected(self) -> None:
         while self.is_alive:
@@ -138,10 +138,16 @@ class Server(_DummyServer):
                     del self.name_to_connection_d[name]
                     print(f'-- Active purged disconnected player {name}')
 
-    async def start_server(self) -> None:
+    async def _start_server(self) -> None:
         """
         Starts the server - but if you want it to actually manage the game,
-        use sync_run instead.
+        use .start instead.
+
+        It is necessary to use .start, because it creates an event loop running
+        in another thread, and passes that event loop to games - (and that event
+        loop is how the games change from synchronous to asynchronous). Without
+        doing that, the server's event loop never starts, and submissions via
+        the player don't run, and nothing happens.
         """
         async with (
             self._make_server(socket.AF_INET) as server_v4,
@@ -153,11 +159,14 @@ class Server(_DummyServer):
                 self._purge_disconnected(),
             )
 
-    def sync_run(self) -> None:
+    def start(self) -> None:
         """
-        Starts the server in a new thread, runs the game in the current thread
+        Starts the server in a new thread, leaving the current thread available for other work
         """
         self._async_thread.start()
+
+    def join(self) -> None:
+        self._async_thread.join()
 
     @contextlib.asynccontextmanager
     async def _make_server(self, mode: socket.AddressFamily) -> ty.AsyncIterator[asyncio.Server]:
@@ -354,11 +363,17 @@ class RemotePlayer(pl.PlayerABC):
         )
         return future.result(timeout=self.TIMEOUT)
 
+    def sync_send_obj(self, obj: common.BaseFrozen) -> None:
+        self._async_do(self.connection.send_obj(obj))
+
+    def sync_recv_obj(self) -> common.BaseFrozen:
+        return self._async_do(self.connection.receive_obj())
+
     def react_to_round_summary(self, round_summary: pg.RoundSummary) -> None:
-        self._async_do(self.connection.send_obj(round_summary))
+        self.sync_send_obj(round_summary)
 
     def send_game_summary(self, game_summary: pg.GameSummary) -> None:
-        self._async_do(self.connection.send_obj(game_summary))
+        self.sync_send_obj(game_summary)
 
     def get_action(
         self,
@@ -368,13 +383,13 @@ class RemotePlayer(pl.PlayerABC):
         num_players_alive: int
     ) -> actions.Action:
         try:
-            self._async_do(self.connection.send_obj(messaging.ActionRequest(
+            self.sync_send_obj(messaging.ActionRequest(
                 round_actions=round_actions,
                 is_single_die_round=is_single_die_round,
                 num_dice_in_play=num_dice_in_play,
                 num_players_alive=num_players_alive,
-            )))
-            putative_action = self._async_do(self.connection.receive_obj())
+            ))
+            putative_action = self.sync_recv_obj()
             if not isinstance(putative_action, actions.Action):
                 return actions.InvalidAction(
                     attempted_action=putative_action,
@@ -393,13 +408,13 @@ class RemotePlayer(pl.PlayerABC):
         dice: collections.Counter[int]
     ) -> None:
         try:
-            self._async_do(self.connection.send_obj(
-                messaging.SetDice(dice=dice)
+            self.sync_send_obj(messaging.SetDice(
+                dice_faces=common.dice_counter_to_list(dice)
             ))
         except Exception as exc:
             # TODO: Disconnect maybe, and give opportunity to reconnect?
             print(
-                f">>> Error communicating with {self.connection.name}: {common.exception_to_str(exc)}. " 
+                f">>> Error communicating with {self.connection.name}: {common.exception_to_str(exc)}\n" 
                 "Player may not have received dice update."
             )
 

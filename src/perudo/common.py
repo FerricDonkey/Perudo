@@ -21,8 +21,30 @@ assert WILD_FACE_VAL == MIN_FACE_VAL, "Wild card must be first"  # TODO fix bid 
 def validate_face(face: int) -> bool:
     return MIN_FACE_VAL <= face <= MAX_FACE_VAL
 
+
 def exception_to_str(exception: Exception) -> str:
     return ''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))
+
+
+def dice_counter_to_list(dice: collections.Counter[int]) -> list[int]:
+    """
+    Take a dice counter (eg {1:2} means 2 1s) and return a list of faces.
+
+    This is necessary because dataclasses.asdict doesn't work on Counters, and
+    also json dumping dictionaries with integer keys converts them to strings.
+    """
+    return sorted([
+        face
+        for face, count in dice.items()
+        for _ in range(count)
+    ])
+
+
+def dice_list_to_counter(dice: list[int]) -> collections.Counter[int]:
+    """
+    take a list of faces and return a counter of faces.
+    """
+    return collections.Counter(dice)
 
 
 class ConstructionError(Exception):
@@ -131,6 +153,18 @@ class BaseFrozen:
     It provides methods to create an instance from a dictionary or a JSON string and
     to convert the instance into a dictionary or a JSON string.
     """
+    SUBCLASS_REGISTRY: ty.ClassVar[dict[str, type['BaseFrozen']]] = {}
+    TYPE_KEY: ty.ClassVar[str] = 'TYPE'
+    DATA_KEY: ty.ClassVar[str] = 'DATA'
+    MAGIC_KEY: ty.ClassVar[str] = '__MAGIC_BASE_FROZEN_KEY__'
+    MAGIC_VALUE: ty.ClassVar[str] = '__MAGIC_BASE_FROZEN_VALUE__'
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        if cls.__name__ in cls.SUBCLASS_REGISTRY:
+            raise TypeError(f"Duplicate class name {cls.__name__} in SUBCLASS_REGISTRY")
+        cls.SUBCLASS_REGISTRY[cls.__name__] = cls
+
     def __post_init__(self) -> None:
         errors: list[str] = []
         for field in dataclasses.fields(self):
@@ -145,6 +179,28 @@ class BaseFrozen:
 
     @classmethod
     def from_dict(cls, input_d: dict[str, ty.Any]) -> ty.Self:
+        if input_d.get(cls.MAGIC_KEY) != cls.MAGIC_VALUE:
+            raise ConstructionError(
+                f"Magic key/value pair {cls.MAGIC_KEY}: {cls.MAGIC_VALUE} "
+                "not found in input_d"
+            )
+        DataType = BaseFrozen.SUBCLASS_REGISTRY[input_d[cls.TYPE_KEY]]
+        tentative: BaseFrozen = _from_jsonable(input_d)
+        if not isinstance(tentative, DataType):
+            raise ConstructionError(
+                f"Magic key/value pair {cls.MAGIC_KEY}: {cls.MAGIC_VALUE} "
+                f"found in input_d, but type of object is {type(tentative)} "
+                f"instead of {DataType}"
+            )
+        if cls is not BaseFrozen and not type(tentative) is cls:
+            raise ConstructionError(
+                f"Expected constructed object of type {cls.__name__}, but got "
+                f"object {tentative} of type {type(tentative).__name__}."
+            )
+        return ty.cast(ty.Self, tentative)
+
+    @classmethod
+    def data_from_data_dict(cls, input_d: dict[str, ty.Any]) -> ty.Self:
         try:
             # Handle nested BaseFrozen types
             errors: list[str] = []
@@ -164,7 +220,25 @@ class BaseFrozen:
 
                 FieldType = field_name_to_type_d[field_name]
                 if isinstance(FieldType, type) and issubclass(FieldType, BaseFrozen):
-                    kwargs[field_name] = FieldType.from_dict(value)
+                    if not isinstance(value, dict):
+                        errors.append(
+                            f"Field {field_name} in input_d to {cls.__name__} expected "
+                            f"type dict for conversion to {FieldType}, but got object "
+                            f"{value} of type {type(value)}."
+                        )
+                        continue
+
+                    if (  # these casts are stupid, and are here because pyright is picky
+                        ty.cast(dict[str, object], value).get(cls.MAGIC_KEY) != cls.MAGIC_VALUE
+                        or ty.cast(dict[str, object], value).get(cls.TYPE_KEY) != FieldType.__name__
+                    ):
+                        errors.append(
+                            f"Field {field_name} in input_d to {cls.__name__} expected "
+                            f"type {FieldType}, but got object {value} of type {type(value)}."
+                        )
+                        continue
+
+                    kwargs[field_name] = FieldType.from_dict(value[FieldType.TYPE_KEY])
                 elif (
                     FieldType is collections.Counter
                     and isinstance(value, dict)
@@ -211,7 +285,63 @@ class BaseFrozen:
             raise ConstructionError(f"Can't construct {cls.__name__} from:\n\n{display_str!r}")
 
     def to_dict(self) -> dict[str, ty.Any]:
-        return dataclasses.asdict(self)
+        return ty.cast(dict[str, ty.Any], _to_jsonable_hopefully(self))
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict())
+
+def _naive_base_frozen_to_d(thing: BaseFrozen) -> dict[str, ty.Any]:
+    return {
+        BaseFrozen.TYPE_KEY: type(thing).__name__,
+        BaseFrozen.DATA_KEY: {
+            field.name: getattr(thing, field.name)
+            for field in dataclasses.fields(thing)
+        },
+        BaseFrozen.MAGIC_KEY: BaseFrozen.MAGIC_VALUE,
+    }
+
+def _to_jsonable_hopefully(thing: object) -> ty.Any:
+    if isinstance(thing, list):
+        return [_to_jsonable_hopefully(element) for element in thing]
+
+    if isinstance(thing, BaseFrozen):
+        return _to_jsonable_hopefully(
+            _naive_base_frozen_to_d(thing)
+        )
+
+    if isinstance(thing, dict):
+        return {
+            _to_jsonable_hopefully(key): _to_jsonable_hopefully(value)
+            for key, value in thing.items()
+        }
+
+    if isinstance(thing, (str, float, int, bytes, bool)):
+        return thing
+
+    raise ConstructionError(f"Can't convert {thing} of type {type(thing).__name__} to jsonable")
+
+def _from_jsonable(thing: object) -> ty.Any:
+    if isinstance(thing, list):
+        return [_from_jsonable(element) for element in thing]
+
+    if isinstance(thing, dict):
+        thing = ty.cast(dict[object, object], thing)
+        if thing.get(BaseFrozen.MAGIC_KEY) == BaseFrozen.MAGIC_VALUE:
+            type_key = thing.get(BaseFrozen.TYPE_KEY)
+            DataType: type | None = BaseFrozen.SUBCLASS_REGISTRY.get(type_key)  # type: ignore
+            if not isinstance(DataType, type) or not issubclass(DataType, BaseFrozen):
+                raise ConstructionError(
+                    f"{thing} contained {BaseFrozen.MAGIC_KEY}: {BaseFrozen.MAGIC_VALUE} "
+                    "but did not specify a valid BaseFrozen type"
+                )
+            return DataType.data_from_data_dict(_from_jsonable(thing[BaseFrozen.DATA_KEY]))
+
+        return {
+            _from_jsonable(key): _from_jsonable(value)
+            for key, value in thing.items()
+        }
+
+    if isinstance(thing, (str, float, int, bytes, bool)):
+        return thing
+
+    raise ConstructionError(f"Can't convert {thing} of type {type(thing).__name__} from jsonable")

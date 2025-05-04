@@ -14,7 +14,6 @@ from cryptography.hazmat.primitives import serialization
 
 from perudo import common
 from perudo import actions
-from perudo import perudo_game as pg
 
 @dataclasses.dataclass(frozen=True)
 class WrappedMessage:
@@ -29,27 +28,19 @@ class WrappedMessage:
     RECEIVED_SALTS and SENT_SALTS are used to prevent replay attacks.
     """
     SALT_LEN: ty.ClassVar[int] = 32
-    TYPE_NAME_TO_TYPE_D: ty.ClassVar[dict[str, type[common.BaseFrozen]]] = {}
     RECEIVED_SALTS: ty.ClassVar[collections.defaultdict[bytes, set[bytes]]] = collections.defaultdict(set)
     SENT_SALTS: ty.ClassVar[set[bytes]] = set()
     VERSION: ty.ClassVar[str] = "0.1"
 
     salt: bytes
     public_key: ed25519.Ed25519PublicKey
-    type_name: str
     data: common.BaseFrozen
     signature: bytes
     version: str = VERSION
 
-    @classmethod
-    def register_type[T: type[common.BaseFrozen]](cls, ToRegister: T) -> T:
-        cls.TYPE_NAME_TO_TYPE_D[ToRegister.__name__] = ToRegister
-        return ToRegister
-
     @staticmethod
     def _get_thing_to_sign(
         public_key: ed25519.Ed25519PublicKey,
-        type_name: str,
         data_bytes: bytes,
         salt: bytes,
     ) -> bytes:
@@ -59,7 +50,6 @@ class WrappedMessage:
                 encoding=serialization.Encoding.Raw,
                 format=serialization.PublicFormat.Raw,
             )
-            + type_name.encode()
             + data_bytes
         )
 
@@ -77,8 +67,6 @@ class WrappedMessage:
 
             public_key = ed25519.Ed25519PublicKey.from_public_bytes(public_key_bytes)
             signature = binascii.unhexlify(as_dict['signature'])
-            type_name = as_dict['type']
-            DataType = cls.TYPE_NAME_TO_TYPE_D[type_name]
             data_bytes = as_dict['data'].encode()
             version = as_dict['version']
 
@@ -89,13 +77,12 @@ class WrappedMessage:
                 signature,
                 cls._get_thing_to_sign(
                     public_key=public_key,
-                    type_name=type_name,
                     data_bytes=data_bytes,
                     salt=salt,
                 ),
             )
 
-            data = DataType.from_json(data_bytes)
+            data = common.BaseFrozen.from_json(data_bytes)
 
         except Exception as exc:
             raise common.ConstructionError(f"Can't construct {cls.__name__} from:\n\n{json_str!r}") from exc
@@ -104,7 +91,6 @@ class WrappedMessage:
         return cls(
             salt=salt,
             public_key=public_key,
-            type_name=type_name,
             data=data,
             signature=signature,
         )
@@ -115,7 +101,6 @@ class WrappedMessage:
         as_dict = {
             'salt': binascii.hexlify(self.salt).decode(),
             'public_key': binascii.hexlify(self.public_key.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)).decode(),
-            'type': self.type_name,
             'data': data_str,
             'signature': self.signature.hex(),
             'version': self.version,
@@ -132,12 +117,8 @@ class WrappedMessage:
         while (salt := secrets.token_bytes(cls.SALT_LEN)) in cls.SENT_SALTS:
             pass
 
-        if type(data).__name__ not in cls.TYPE_NAME_TO_TYPE_D:
-            raise common.ConstructionError(f"Can't construct {cls.__name__} from {data} because it's not a known type")
-
         to_sign = cls._get_thing_to_sign(
             public_key=private_key.public_key(),
-            type_name=type(data).__name__,
             data_bytes=data.to_json().encode(),
             salt=salt,
         )
@@ -147,7 +128,6 @@ class WrappedMessage:
         return cls(
             salt=salt,
             public_key=private_key.public_key(),
-            type_name=type(data).__name__,
             data=data,
             signature=signature,
         )
@@ -164,40 +144,30 @@ class WrappedMessage:
         )
         return message.to_bytes()
 
-@WrappedMessage.register_type
+
 @dataclasses.dataclass(frozen=True)
 class Error(common.BaseFrozen):
     contents: str
 
 
-# Kinda gross-ish, but I'm doing this to keep the base game not caring about
-# network stuff while simplifying the messages and avoid a message wrapping
-# a message that says what kind of action it is.
-WrappedMessage.register_type(actions.Bid)
-WrappedMessage.register_type(actions.Challenge)
-WrappedMessage.register_type(actions.Exact)
-WrappedMessage.register_type(pg.RoundSummary)
-
 ### Handshake Messages
-@WrappedMessage.register_type
 @dataclasses.dataclass(frozen=True)
 class FromServerHandshake(common.BaseFrozen):
     message: str = "Who dis?"
 
-@WrappedMessage.register_type
+
 @dataclasses.dataclass(frozen=True)
 class ToServerHandshake(common.BaseFrozen):
     name: str
 
 ### Can be used by client or server
-@WrappedMessage.register_type
 @dataclasses.dataclass(frozen=True)
 class NoOp(common.BaseFrozen):
     """
     Exists mostly just to test that the connection is alive
     """
 
-@WrappedMessage.register_type
+
 @dataclasses.dataclass(frozen=True)
 class Corrupted(common.BaseFrozen):
     """
@@ -206,7 +176,7 @@ class Corrupted(common.BaseFrozen):
     contents: object
 
 ### General Use Messages: FROM SERVER TO CLIENT
-@WrappedMessage.register_type
+
 @dataclasses.dataclass(frozen=True)
 class ActionRequest(common.BaseFrozen):
     """
@@ -219,15 +189,17 @@ class ActionRequest(common.BaseFrozen):
     num_dice_in_play: int
     num_players_alive: int
 
-@WrappedMessage.register_type
+
 @dataclasses.dataclass(frozen=True)
 class SetDice(common.BaseFrozen):
     """
     FROM SERVER TO CLIENT: tell the client what dice they get
-    """
-    dice: collections.Counter[int]
 
-@WrappedMessage.register_type
+    Sends dice as list rather than counter, for better behavior with json
+    """
+    dice_faces: list[int]
+
+
 @dataclasses.dataclass(frozen=True)
 class RoomsListResponse(common.BaseFrozen):
     room_to_members: dict[str, list[str]]
@@ -243,17 +215,16 @@ class RoomsListResponse(common.BaseFrozen):
             print()
 
 ### General Use Messages: FROM CLIENT TO SERVER
-@WrappedMessage.register_type
 @dataclasses.dataclass(frozen=True)
 class RequestRoomList(common.BaseFrozen):
     pass
 
-@WrappedMessage.register_type
+
 @dataclasses.dataclass(frozen=True)
 class JoinRoom(common.BaseFrozen):
     room_name: str | None  # value of None means to pick a room at random
 
-@WrappedMessage.register_type
+
 @dataclasses.dataclass(frozen=True)
 class CreateRoom(common.BaseFrozen):
     room_name: str

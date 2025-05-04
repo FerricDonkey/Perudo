@@ -15,7 +15,6 @@ Key game rules:
 - Last player with dice wins
 """
 
-import argparse
 import collections
 import dataclasses
 import random
@@ -345,7 +344,7 @@ class RoundSummary(common.BaseFrozen):
     so desire.
     """
     ordered_players: list[str]
-    all_player_dice: list[collections.Counter[int]]
+    all_player_dice: list[list[int]]
     all_actions: list[actions.Action]
     single_die_round: bool
     losers: list[str]
@@ -358,7 +357,10 @@ class RoundSummary(common.BaseFrozen):
     ) -> ty.Self:
         return cls(
             ordered_players=[game.players[index].name for index in game.all_rounds_living_players[-1]],
-            all_player_dice=game.all_rounds_dice[-1],
+            all_player_dice=[
+                common.dice_counter_to_list(dice)
+                for dice in game.all_rounds_dice[-1]
+            ],
             all_actions=game.all_rounds_actions[-1],
             single_die_round=game.single_die_round_history[-1],
             losers=[player.name for player in losers],
@@ -367,7 +369,7 @@ class RoundSummary(common.BaseFrozen):
     def print(self) -> None:
         print('===================')
         for player, dice in zip(self.ordered_players, self.all_player_dice):
-            print(f'  {player}: {dice_to_str(dice)}')
+            print(f'  {player}: {dice_to_str(common.dice_list_to_counter(dice))}')
         print('  -----------------')
         action_print_width = len(str(len(self.all_actions)))
         player_print_width = max(len(player) for player in self.ordered_players)
@@ -384,7 +386,7 @@ class GameSummary(common.BaseFrozen):
     network via standard send_obj methods.
     """
     all_rounds_actions: list[list[actions.Action]]
-    all_rounds_dice: list[list[collections.Counter[int]]]
+    all_rounds_dice: list[list[list[int]]]
     all_rounds_living_players: list[list[str]]
     all_rounds_losers: list[list[str]]
     single_die_round_history: list[bool]
@@ -398,7 +400,10 @@ class GameSummary(common.BaseFrozen):
     ) -> ty.Self:
         return cls(
             all_rounds_actions=game.all_rounds_actions,
-            all_rounds_dice=game.all_rounds_dice,
+            all_rounds_dice=[
+                [common.dice_counter_to_list(dice) for dice in round_dice]
+                for round_dice in game.all_rounds_dice
+            ],
             all_rounds_living_players=[
                 [
                     game.players[player_index].name

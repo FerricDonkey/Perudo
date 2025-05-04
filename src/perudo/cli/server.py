@@ -4,7 +4,6 @@ CLI entry point for hosting a server
 can be run directly, or through cli_main.py or __main__.py
 """
 import argparse
-import asyncio
 import sys
 
 from perudo.network_stuff import network_common as nc
@@ -44,12 +43,19 @@ def main(args: argparse.Namespace | None = None) -> int:
         parser = make_parser()
         args = parser.parse_args()
 
+    # from perudo import common
+    # for key, value in common.BaseFrozen.SUBCLASS_REGISTRY.items():
+    #     print(f"{key}: {value}")
+    #
+    # return
+
     server = nss.Server(
         max_players_per_game=args.max_players_per_game,
         max_concurrent_games=args.max_concurrent_games,
         port=args.port,
     )
-    asyncio.run(server.start_server())
+    server.start()
+    server.join()
     return 0
 
 if __name__ == '__main__':

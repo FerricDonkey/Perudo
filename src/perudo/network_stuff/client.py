@@ -103,8 +103,10 @@ class ClientPlayer:
             elif isinstance(message, messaging.NoOp):
                 pass
             elif isinstance(message, messaging.SetDice):
-                print(f"Player {self.player.name} set dice to {message.dice}")
-                self.player.set_dice(message.dice)
+                print(f"Player {self.player.name} set dice to {message.dice_faces}")
+                self.player.set_dice(
+                    common.dice_list_to_counter(message.dice_faces)
+                )
             elif isinstance(message, messaging.ActionRequest):
                 action = self.player.get_action(
                     round_actions=message.round_actions,
