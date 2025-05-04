@@ -156,7 +156,8 @@ class PerudoGame:
                 range(common.MIN_FACE_VAL, common.MAX_FACE_VAL),
                 k=num_dice
             ))
-            player.set_dice(dice)
+            if num_dice > 0:
+                player.set_dice(dice)
             self.current_round_dice_by_player.append(dice)
 
         if self.print_while_playing:
@@ -234,9 +235,6 @@ class PerudoGame:
         """
         returns True if the game continues, False if not
         """
-        # Get action from player
-        if len(self.current_round_actions) > 20:
-            raise
         action = self.players[self.cur_player_index].get_action(
             round_actions=self.current_round_actions,
             is_single_die_round=self.cur_round_single_die,
