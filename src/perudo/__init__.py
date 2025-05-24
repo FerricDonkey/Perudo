@@ -12,3 +12,4 @@ from perudo.actions import Bid, Challenge, Exact
 from perudo.players import PlayerABC, RandomLegalPlayer, ProbabilisticPlayer, HumanPlayer
 from perudo.perudo_game import PerudoGame
 from perudo.network_stuff.client import ClientPlayer
+from perudo.cli.cli_main import  main

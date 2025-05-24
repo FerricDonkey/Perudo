@@ -87,14 +87,11 @@ class PlayerABC:
     ) -> actions.Action:
         raise NotImplementedError('Implement me bro.')
 
-    @abc.abstractmethod
     def set_dice(self, dice: collections.Counter[int]) -> None:
         """
-        Set players current dice to specified list.
-
-        This is a method so that it can be overridden for network players
+        Set the players dice. Makes a copy out of paranoia. Shouldn't matter.
         """
-        raise NotImplementedError('Implement me bro')
+        self.cur_dice = dice.copy()  # paranoid aliasing prevention - shouldn't ever matter
 
     @classmethod
     def from_name(cls, name: str) -> ty.Self:
@@ -168,21 +165,17 @@ class HumanPlayer(PlayerABC):
 
     def set_dice(self, dice: collections.Counter[int]) -> None:
         print(f"{self.name} has dice {", ".join(map(str, sorted(dice)))}")
-        self.cur_dice = dice.copy()  # paranoid aliasing prevention - shouldn't ever matter
+        super().set_dice(dice)
 
 
 @PlayerABC.register_constructor
 @dataclasses.dataclass(kw_only=True)
 class RandomLegalPlayer(PlayerABC):
     """
-    Chooses a random move that's legal and does it. Has a max bid it will never
-    exceed.
+    Chooses a random move that's legal and does it. Will never bid more dice than are in play.
     """
     end_pct_chance: float = 0.5
     exact_pct_change: float = 0.5
-
-    def set_dice(self, dice: collections.Counter[int]) -> None:
-        self.cur_dice = dice.copy()  # paranoid aliasing prevention - shouldn't ever matter
 
     def get_end_action(self) -> actions.EndAction:
         if random.random() < self.exact_pct_change:
@@ -223,7 +216,9 @@ class RandomLegalPlayer(PlayerABC):
 @PlayerABC.register_constructor
 @dataclasses.dataclass(kw_only=True)
 class ProbabilisticPlayer(PlayerABC):
-    set_dice = RandomLegalPlayer.set_dice
+    """
+    Player bot who only uses some basic probabilities to decide what to do.
+    """
 
     def _get_prob_of_challenge_success(
         self,
@@ -276,8 +271,8 @@ class ProbabilisticPlayer(PlayerABC):
 
         return prob
 
+    @staticmethod
     def _get_opening_bid(
-        self,
         is_single_die_round: bool,
         non_wild_avg_count: float,
         #avg_wild_count: int,
