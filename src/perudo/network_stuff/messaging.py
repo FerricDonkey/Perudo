@@ -162,7 +162,7 @@ class ToServerHandshake(common.BaseFrozen):
 
 ### Can be used by client or server
 @dataclasses.dataclass(frozen=True)
-class NoOp(common.BaseFrozen):
+class NoOpMessage(common.BaseFrozen):
     """
     Exists mostly just to test that the connection is alive
     """
@@ -181,13 +181,13 @@ class Corrupted(common.BaseFrozen):
 class ActionRequest(common.BaseFrozen):
     """
     FROM SERVER TO CLIENT: request an action. Client should respond with action
-
-    Fields should match argument to players.PlayerABC.get_action
     """
-    round_actions: list[actions.Action]
+    previous_action: actions.Bid | None
     is_single_die_round: bool
     num_dice_in_play: int
-    num_players_alive: int
+    player_dice_count_history: list[list[int]]
+    all_rounds_actions: list[list[actions.Action]]
+    dice_reveal_history_listified: list[list[list[int]]]
 
 
 @dataclasses.dataclass(frozen=True)

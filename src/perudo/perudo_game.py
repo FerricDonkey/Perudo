@@ -48,47 +48,18 @@ class PerudoGame:
 
     I have no idea what the below syntax means or what system it is for, but it's what the AI did,
     and I'm leaving it until I get around to replacing it with something more compact.
-
-    :ivar STARTING_NUM_DICE: The default starting number of dice each player begins with.
-    :type STARTING_NUM_DICE: int
-
-    :ivar players: List of players participating in the game.
-    :type players: list[perudo.players.PlayerABC]
-
-    :ivar player_index_to_num_dice: List mapping each player's index to the number of dice they hold.
-    :type player_index_to_num_dice: list[int]
-
-    :ivar cur_player_index: The index of the current player whose turn it is.
-    :type cur_player_index: int
-
-    :ivar cur_round_single_die: Indicates if the current round is a single-die round.
-    :type cur_round_single_die: bool
-
-    :ivar all_rounds_actions: History of actions taken in all rounds, stored as a list of lists.
-    :type all_rounds_actions: list[list[actions.Action]]
-
-    :ivar all_rounds_dice: History of dice rolls for all players across all rounds.
-    :type all_rounds_dice: list[list[list[int]]]
-
-    :ivar all_rounds_living_players: Tracks the living players for each round.
-    :type all_rounds_living_players: list[list[int]]
-
-    :ivar all_rounds_losers: Tracks players who lost dice in each round.
-    :type all_rounds_losers: list[list[int]]
     """
-    STARTING_NUM_DICE: ty.ClassVar[int] = 5
-
     players: list[pl.PlayerABC]
-    player_index_to_num_dice: list[int]
+    player_dice_count_history: list[list[int]] = dataclasses.field(default_factory=list[list[int]])
     cur_player_index: int = -1
     cur_round_single_die: bool = False
     all_rounds_actions: list[list[actions.Action]] = dataclasses.field(default_factory=list[list[actions.Action]])
     all_rounds_dice: list[list[collections.Counter[int]]] = dataclasses.field(default_factory=list[list[collections.Counter[int]]])
-    all_rounds_living_players: list[list[int]] = dataclasses.field(default_factory=list[list[int]])
     all_rounds_losers: list[list[int]] = dataclasses.field(default_factory=list[list[int]])
     single_die_round_history: list[bool] = dataclasses.field(default_factory=list[bool])
     print_while_playing: bool = False
     print_non_human_dice: bool = True
+    hide_noops: bool = False
 
     @property
     def current_round_actions(self) -> list[actions.Action]:
@@ -109,24 +80,35 @@ class PerudoGame:
         dice
         """
         prev_index = (self.cur_player_index - 1) % len(self.players)
-        while self.player_index_to_num_dice[prev_index] == 0:
+        while self.player_dice_count_history[-1][prev_index] == 0:
             if prev_index == self.cur_player_index:
                 raise RuntimeError("previous_living_player_index used when there wasn't one")
             prev_index = (prev_index - 1) % len(self.players)
         return prev_index
 
-    @property
-    def next_living_player_index(self) -> int:
+    def get_next_living_player_index(self) -> int:
         """
         Raises an error if no player (excluding the current player) has any
         dice
         """
         next_index = (self.cur_player_index + 1) % len(self.players)
-        while self.player_index_to_num_dice[next_index] == 0:
+        while self.player_dice_count_history[-1][next_index] == 0:
             if next_index == self.cur_player_index:
                 raise RuntimeError("next_living_player_index used when there wasn't one")
             next_index = (next_index + 1) % len(self.players)
         return next_index
+
+    def get_most_recent_non_noop_action(self) -> actions.Bid | None:
+        for prev_action in reversed(self.current_round_actions):
+            if not isinstance(prev_action, actions.NoOp):
+                break
+        else:
+            return None
+        assert isinstance(prev_action, actions.Bid), (
+            "Last action was not a bid. This should never happen. "
+            f"{prev_action=}, {self.current_round_actions=}, {self.all_rounds_actions=}"
+        )
+        return prev_action
 
     def start_new_round(
         self,
@@ -136,22 +118,16 @@ class PerudoGame:
         if not (0 <= first_player_index < len(self.players)):
             raise RuntimeError(f'Invalid first_player_index {first_player_index} (Out of range)')
 
-        if self.player_index_to_num_dice[first_player_index] < 1:
+        if self.player_dice_count_history[-1][first_player_index] < 1:
             raise RuntimeError(f'Invalid first_player_index {first_player_index} (does not have dice)')
 
         self.single_die_round_history.append(single_die_round)
         self.cur_round_single_die = single_die_round
-        self.all_rounds_actions.append([])
-        self.all_rounds_dice.append([])
-        living_players = [
-            index % len(self.players)
-            for index in range(first_player_index, first_player_index + len(self.players))
-            if self.player_index_to_num_dice[index % len(self.players)] > 0
-        ]
-        self.all_rounds_living_players.append(living_players)
+        self.all_rounds_actions.append([actions.NoOpFirstTurnSkip() for _ in range(first_player_index)])
         self.cur_player_index = first_player_index
 
-        for player, num_dice in zip(self.players, self.player_index_to_num_dice):
+        self.all_rounds_dice.append([])
+        for player, num_dice in zip(self.players, self.player_dice_count_history[-1]):
             dice = collections.Counter(random.choices(  # sorted makes display nicer
                 range(common.MIN_FACE_VAL, common.MAX_FACE_VAL),
                 k=num_dice
@@ -160,20 +136,32 @@ class PerudoGame:
             self.current_round_dice_by_player.append(dice)
 
         if self.print_while_playing:
-            print(f"\nStarting new round ({single_die_round=} num_die={sum(self.player_index_to_num_dice)}):\n====================")
-            for player_index in self.all_rounds_living_players[-1]:
-                if not (self.print_non_human_dice or isinstance(self.players[player_index], pl.HumanPlayer)):
-                    continue
-                dice_counter = self.current_round_dice_by_player[player_index]
+            print(f"\nStarting new round ({single_die_round=} num_dice_in_play={sum(self.player_dice_count_history[-1])}):\n====================")
+            for player_index, (
+                player,
+                player_dice,
+                player_num_dice,
+            ) in enumerate(zip(
+                self.players,
+                self.current_round_dice_by_player,
+                self.player_dice_count_history[-1]
+            )):
+                if not self.print_non_human_dice and not isinstance(player, pl.HumanPlayer):
+                    dice_str = "MASKED"
+                else:
+                    dice_str = dice_to_str(player_dice)
+
+                if player_index == first_player_index:
+                    first_indicator = " <-------- First"
+                else:
+                    first_indicator = ""
+
+                index_pwidth = len(str(len(self.players) - 1))
                 print(
-                    "{name} ({dice_count} dice): {dice_string}".format(
-                        name=self.players[player_index].name,
-                        dice_count=self.player_index_to_num_dice[player_index],
-                        dice_string=dice_to_str(dice_counter),
-                    )
+                    f'{player_index:>{index_pwidth}} - {player.name} '
+                    f'({player_num_dice} dice): {dice_str}{first_indicator}'
                 )
             print("-------------------")
-
 
     def end_round(
         self,
@@ -186,22 +174,23 @@ class PerudoGame:
         :return: Whether there's a next round
         """
         self.all_rounds_losers.append(sorted(loser_indexes))
+        self.player_dice_count_history.append(self.player_dice_count_history[-1].copy())
         for index in loser_indexes:
-            self.player_index_to_num_dice[index] = max(0, self.player_index_to_num_dice[index] - 1)
+            self.player_dice_count_history[-1][index] = max(0, self.player_dice_count_history[-1][index] - 1)
 
         # Start a new round if multiple people are still alive
-        if sum(num > 0 for num in self.player_index_to_num_dice) > 1:
+        if sum(num > 0 for num in self.player_dice_count_history[-1]) > 1:
             losers_with_dice = [
                 index for index in loser_indexes
-                if self.player_index_to_num_dice[index] > 0
+                if self.player_dice_count_history[-1][index] > 0
             ]
             # TODO: Is this right?
             if losers_with_dice:
                 next_player = random.choice(losers_with_dice)
             else:
-                next_player = self.next_living_player_index
+                next_player = self.get_next_living_player_index()
             if any(
-                self.player_index_to_num_dice[index] == 1
+                self.player_dice_count_history[-1][index] == 1
                 for index in losers_with_dice
             ):
                 single_die_round = True
@@ -234,25 +223,26 @@ class PerudoGame:
         """
         returns True if the game continues, False if not
         """
+        if self.player_dice_count_history[-1][self.cur_player_index] == 0:
+            raise RuntimeError(f"Player index {self.cur_player_index} has no dice left")
+        previous_action = self.get_most_recent_non_noop_action()
         action = self.players[self.cur_player_index].get_action(
-            round_actions=self.current_round_actions,
+            previous_action=previous_action,
             is_single_die_round=self.cur_round_single_die,
-            num_dice_in_play=sum(self.player_index_to_num_dice),
-            num_players_alive=sum(count > 0 for count in self.player_index_to_num_dice),
+            num_dice_in_play=sum(self.player_dice_count_history[-1]),
+            player_dice_count_history=self.player_dice_count_history,
+            all_rounds_actions=self.all_rounds_actions,
+            dice_reveal_history=self.all_rounds_dice[:-1],  # do not send the current rounds dice
         )
-        if not self.current_round_actions:
-            prev_action = None
-        else:
-            prev_action = self.current_round_actions[-1]
 
         # Check if the action was valid. Will be an InvalidAction object if not
         action = action.validate(
-            previous=prev_action,
+            previous_action=previous_action,
             is_single_die_round=self.cur_round_single_die,
         )
+        self.current_round_actions.append(action)
         if self.print_while_playing:
             print(f"    {self.players[self.cur_player_index].typed_name}: {action}")
-        self.current_round_actions.append(action)
 
         # Handle round ending actions (including InvalidActions)
         if isinstance(action, actions.EndAction):
@@ -263,11 +253,11 @@ class PerudoGame:
             ]
             other_living_players = [
                 player_index
-                for player_index, num_dice in enumerate(self.player_index_to_num_dice)
+                for player_index, num_dice in enumerate(self.player_dice_count_history[-1])
                 if player_index != self.cur_player_index and num_dice > 0
             ]
             losers = action.get_losers(
-                previous_action=prev_action,
+                previous_action=previous_action,
                 all_dice=all_dice,
                 is_single_die_round=self.cur_round_single_die,
                 caller=self.cur_player_index,
@@ -279,7 +269,15 @@ class PerudoGame:
 
             return self.end_round(loser_indexes=losers,)
 
-        self.cur_player_index = self.next_living_player_index
+        next_player_index = self.get_next_living_player_index()
+        noop_index = (self.cur_player_index + 1) % len(self.players)
+        while noop_index != next_player_index:
+            self.current_round_actions.append(actions.NoOpDead())
+            if self.print_while_playing and not self.hide_noops:
+                print(f"       (  {self.players[noop_index].typed_name}: {actions.NoOpDead()}  )")
+            noop_index = (noop_index + 1) % len(self.players)
+
+        self.cur_player_index = next_player_index
         return True
 
     @classmethod
@@ -288,10 +286,16 @@ class PerudoGame:
         players: list[pl.PlayerABC],
         print_while_playing: bool=True,
         print_non_human_dice: bool=True,
+        shuffle_players: bool=True,
     ) -> ty.Self:
+        if shuffle_players:
+            players = random.sample(players, len(players))
+        else:
+            players = players.copy()
+
         return cls(
             players=players,
-            player_index_to_num_dice=[cls.STARTING_NUM_DICE for _ in players],
+            player_dice_count_history=[[common.STARTING_NUM_DICE for _ in players]],
             print_while_playing=print_while_playing,
             print_non_human_dice=print_non_human_dice,
         )
@@ -311,14 +315,20 @@ class PerudoGame:
     def main_loop(
         self,
         game_end_callback: ty.Callable[[pl.PlayerABC], None] | None = None,
+        randomize_starting_player: bool = True,
     ) -> int:
         """
-        Suitable for running the game purely locally
+        Run the game until it ends.
 
+        :param randomize_starting_player: If True, the starting player will be chosen randomly. Else, 0 goes first
         :param game_end_callback: Function called at game end with winning player
         :return: winning player index
         """
-        first_player_index = random.randrange(len(self.players))
+        if randomize_starting_player:
+            first_player_index = random.randrange(len(self.players))
+        else:
+            first_player_index = 0
+
         self.start_new_round(
             first_player_index=first_player_index,
             single_die_round=False,  # Assuming we're not being weird.
@@ -340,8 +350,7 @@ class RoundSummary(common.BaseFrozen):
     players in a network game - but players can react to it as well, if they
     so desire.
     """
-    all_players: list[str]
-    ordered_living_players: list[str]
+    players: list[str]
     all_player_dice: list[list[int]]
     all_actions: list[actions.Action]
     single_die_round: bool
@@ -353,10 +362,8 @@ class RoundSummary(common.BaseFrozen):
         game: PerudoGame,
         losers: list[pl.PlayerABC],
     ) -> ty.Self:
-        ordered_player_indexes = game.all_rounds_living_players[-1]
         return cls(
-            all_players=[player.name for player in game.players],
-            ordered_living_players=[game.players[index].name for index in ordered_player_indexes],
+            players=[player.name for player in game.players],
             all_player_dice=[
                 common.dice_counter_to_list(dice)
                 for dice in game.all_rounds_dice[-1]
@@ -366,19 +373,32 @@ class RoundSummary(common.BaseFrozen):
             losers=[player.name for player in losers],
         )
 
-    def print(self) -> None:
+    def print(self, hide_noop:bool=False) -> None:
         print('===================')
-        for player, dice in zip(self.all_players, self.all_player_dice):
+        for player, dice in zip(self.players, self.all_player_dice):
             if dice:
                 print(f'  {player} ({len(dice)}): {dice_to_str(common.dice_list_to_counter(dice))}')
             else:
                 print(f'  {player} (0): Dead')
         print('  -----------------')
         action_print_width = len(str(len(self.all_actions)))
-        player_print_width = max(len(player) for player in self.all_players)
+        player_print_width = max(len(player) for player in self.players)
+        print(self.all_actions)
         for action_index, action in enumerate(self.all_actions):
-            player = self.ordered_living_players[action_index % len(self.ordered_living_players)]
-            print(f'  {action_index:>{action_print_width}} - {player+':':<{player_print_width+1}} {action}')
+            if isinstance(action, actions.NoOp):
+                if hide_noop:
+                    continue
+                prefix = "    (  "
+                suffix = "  )"
+            else:
+                prefix = ""
+                suffix = ""
+
+            player = self.players[action_index % len(self.players)]
+            print(
+                f'  {prefix}{action_index:>{action_print_width}} - '
+                f'{player+':':<{player_print_width+1}} {action}{suffix}'
+            )
         print('  -----------------')
         print(f'  Round Loser(s): {", ".join(self.losers)}\n')
 
@@ -390,8 +410,7 @@ class GameSummary(common.BaseFrozen):
     """
     all_rounds_actions: list[list[actions.Action]]
     all_rounds_dice: list[list[list[int]]]
-    all_players: list[str]
-    all_rounds_living_players: list[list[str]]
+    players: list[str]
     all_rounds_losers: list[list[str]]
     single_die_round_history: list[bool]
     winner: str
@@ -408,14 +427,7 @@ class GameSummary(common.BaseFrozen):
                 [common.dice_counter_to_list(dice) for dice in round_dice]
                 for round_dice in game.all_rounds_dice
             ],
-            all_players=[player.name for player in game.players],
-            all_rounds_living_players=[
-                [
-                    game.players[player_index].name
-                    for player_index in player_indices
-                ]
-                for player_indices in game.all_rounds_living_players
-            ],
+            players=[player.name for player in game.players],
             all_rounds_losers=[
                 [
                     game.players[player_index].name
@@ -427,17 +439,15 @@ class GameSummary(common.BaseFrozen):
             winner=game.players[winner_index].name,
         )
 
-    def print(self) -> None:
+    def print(self, hide_noop:bool=False) -> None:
         print("Game Summary:\n==============")
         for round_index, (
-                ordered_players,
                 round_actions,
                 round_dice,
                 round_losers,
                 single_die_round,
         ) in enumerate(
             zip(
-                self.all_rounds_living_players,
                 self.all_rounds_actions,
                 self.all_rounds_dice,
                 self.all_rounds_losers,
@@ -448,12 +458,11 @@ class GameSummary(common.BaseFrozen):
             header = f"Round {round_index} ({single_die_round=})"
             print(f'{"-" * len(header)}\n{header}')
             round_summary = RoundSummary(
-                all_players=self.all_players,
-                ordered_living_players=ordered_players,
+                players=self.players,
                 all_player_dice=round_dice,
                 all_actions=round_actions,
                 single_die_round=single_die_round,
                 losers=round_losers,
             )
-            round_summary.print()
+            round_summary.print(hide_noop=hide_noop)
         print(f"==============\nWinner: {self.winner}\n")

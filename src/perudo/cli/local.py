@@ -103,8 +103,6 @@ def main(args: argparse.Namespace | None = None) -> int:
         print_non_human_dice=args.print_non_human_dice,
     )
     who_won = game.main_loop()
-    # if not args.verbose:
-    #     game.print_summary()  # todo this is kind of redundant
     print(f"The winner was {game.players[who_won].name}")
     return 0
 

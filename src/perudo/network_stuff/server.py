@@ -35,6 +35,9 @@ class _DummyServer(abc.ABC, metaclass=abc.ABCMeta):
 
     Essentially, this base class makes it so that subclasses can register
     handlers by use of the decorator
+
+    TODO: Consider making this general, and using it for client and server
+          separately so they both can register callbacks.
     """
     MESSAGE_TYPE_TO_HANDLER_D: ty.ClassVar[dict[
         type[common.BaseFrozen],
@@ -377,17 +380,24 @@ class RemotePlayer(pl.PlayerABC):
 
     def get_action(
         self,
-        round_actions: list[actions.Action],
+        previous_action: actions.Bid | None,
         is_single_die_round: bool,
         num_dice_in_play: int,
-        num_players_alive: int
+        player_dice_count_history: list[list[int]],
+        all_rounds_actions: list[list[actions.Action]],
+        dice_reveal_history: list[list[collections.Counter[int]]],
     ) -> actions.Action:
         try:
             self.sync_send_obj(messaging.ActionRequest(
-                round_actions=round_actions,
+                previous_action=previous_action,
                 is_single_die_round=is_single_die_round,
                 num_dice_in_play=num_dice_in_play,
-                num_players_alive=num_players_alive,
+                player_dice_count_history=player_dice_count_history,
+                all_rounds_actions=all_rounds_actions,
+                dice_reveal_history_listified=[
+                    [common.dice_counter_to_list(dice) for dice in dice_round]
+                    for dice_round in dice_reveal_history
+                ],
             ))
             putative_action = self.sync_recv_obj()
             if not isinstance(putative_action, actions.Action):

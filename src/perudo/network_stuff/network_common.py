@@ -171,7 +171,7 @@ class Connection:
 
         Note that the send_obj method will close the connection if it fails.
         """
-        await self.send_obj(messaging.NoOp())
+        await self.send_obj(messaging.NoOpMessage())
         if self._writer.is_closing():
             return False
         return True

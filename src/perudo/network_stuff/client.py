@@ -34,7 +34,7 @@ class ClientPlayer:
             if isinstance(message, (messaging.Error, messaging.Corrupted)):
                 print(message.contents)
                 return
-            elif isinstance(message, messaging.NoOp):
+            elif isinstance(message, messaging.NoOpMessage):
                 pass
             elif isinstance(message, messaging.SetDice):
                 print(f"Player {self.player.name} set dice to {message.dice_faces}")
@@ -43,10 +43,15 @@ class ClientPlayer:
                 )
             elif isinstance(message, messaging.ActionRequest):
                 action = self.player.get_action(
-                    round_actions=message.round_actions,
+                    previous_action=message.previous_action,
                     is_single_die_round=message.is_single_die_round,
                     num_dice_in_play=message.num_dice_in_play,
-                    num_players_alive=message.num_players_alive,
+                    player_dice_count_history=message.player_dice_count_history,
+                    all_rounds_actions=message.all_rounds_actions,
+                    dice_reveal_history=[
+                        [common.dice_list_to_counter(dice_l) for dice_l in reveal_round]
+                        for reveal_round in message.dice_reveal_history_listified
+                    ],
                 )
                 await self.connection.send_obj(action)
             elif isinstance(message, pg.RoundSummary):

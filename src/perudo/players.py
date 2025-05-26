@@ -80,10 +80,12 @@ class PlayerABC:
     @abc.abstractmethod
     def get_action(
         self,
-        round_actions: list[actions.Action],
+        previous_action: actions.Bid | None,
         is_single_die_round: bool,
         num_dice_in_play: int,
-        num_players_alive: int,
+        player_dice_count_history: list[list[int]],
+        all_rounds_actions: list[list[actions.Action]],
+        dice_reveal_history: list[list[collections.Counter[int]]],
     ) -> actions.Action:
         raise NotImplementedError('Implement me bro.')
 
@@ -129,34 +131,33 @@ class HumanPlayer(PlayerABC):
     """
     def get_action(
         self,
-        round_actions: list[actions.Action],
+        previous_action: actions.Bid | None,
         is_single_die_round: bool,
         num_dice_in_play: int,
-        num_players_alive: int,
+        player_dice_count_history: list[list[int]],
+        all_rounds_actions: list[list[actions.Action]],
+        dice_reveal_history: list[list[collections.Counter[int]]],
     ) -> actions.Action:
-        last_action = None
-        if round_actions:
-            last_action = round_actions[-1]
-        assert isinstance(last_action, actions.Bid | None)
+        assert isinstance(previous_action, actions.Bid | None)
 
         fixed_face = None
-        if is_single_die_round and isinstance(last_action, actions.Bid):
-            fixed_face = last_action.face
+        if is_single_die_round and isinstance(previous_action, actions.Bid):
+            fixed_face = previous_action.face
 
         action: actions.Action
         while True:
-            if not round_actions:
+            if previous_action is None:
                 action = actions.Bid.get_from_human(fixed_face=fixed_face)
             else:
                 action = actions.Action.get_from_human(fixed_face=fixed_face)
 
             action = action.validate(
-                previous=last_action,
+                previous_action=previous_action,
                 is_single_die_round=is_single_die_round,
             )
-            if not action:
+            if isinstance(action, actions.InvalidAction):
                 print(
-                    f"Illegal Action. Must legally follow {last_action}"
+                    f"Illegal Action. Must legally follow {previous_action}"
                     + f" and use face {fixed_face}" * (fixed_face is not None)
                 )
                 continue
@@ -184,27 +185,28 @@ class RandomLegalPlayer(PlayerABC):
 
     def get_action(
         self,
-        round_actions: list[actions.Action],
+        previous_action: actions.Bid | None,
         is_single_die_round: bool,
         num_dice_in_play: int,
-        num_players_alive: int,
+        player_dice_count_history: list[list[int]],
+        all_rounds_actions: list[list[actions.Action]],
+        dice_reveal_history: list[list[collections.Counter[int]]],
     ) -> actions.Action:
-        if round_actions and random.random() < self.end_pct_chance:
+        if previous_action is not None and random.random() < self.end_pct_chance:
             return self.get_end_action()
 
-        if not round_actions:
-            face = common.WILD_FACE_VAL
+        if previous_action is None:
+            face = random.randint(common.MIN_FACE_VAL, common.MAX_FACE_VAL)
             # Note: Don't want to assume that the WILD is the MIN, even though
             # that's true and always will be because I'm pedantic as crap.
-            while face == common.WILD_FACE_VAL:
-                face = random.randint(common.MIN_FACE_VAL, common.MAX_FACE_VAL)
+            if not is_single_die_round:
+                while face == common.WILD_FACE_VAL:
+                    face = random.randint(common.MIN_FACE_VAL, common.MAX_FACE_VAL)
             min_count = 1
         else:
             face = random.randint(common.MIN_FACE_VAL, common.MAX_FACE_VAL)
-            previous_action = round_actions[-1]
             assert isinstance(previous_action, actions.Bid)
             min_count = previous_action.min_next_count(face)
-
 
         if min_count > num_dice_in_play:
             return self.get_end_action()
@@ -299,7 +301,7 @@ class ProbabilisticPlayer(PlayerABC):
 
     def _get_expected_best_action(
         self,
-        round_actions: list[actions.Action],
+        previous_bid:actions.Bid,
         is_single_die_round: bool,
         num_other_dice: int,
         num_players_alive: int,
@@ -310,9 +312,6 @@ class ProbabilisticPlayer(PlayerABC):
         #       into a worse position making challenging more risky (but still
         #       the right play at that time) or because the calculations for
         #       expected value are wrong?
-        assert round_actions
-        previous_bid = round_actions[-1]
-        assert isinstance(previous_bid, actions.Bid)
 
         p_challenge = self._get_prob_of_challenge_success(
             face=previous_bid.face,
@@ -369,30 +368,32 @@ class ProbabilisticPlayer(PlayerABC):
 
     def get_action(
         self,
-        round_actions: list[actions.Action],
+        previous_action: actions.Bid | None,
         is_single_die_round: bool,
         num_dice_in_play: int,
-        num_players_alive: int,
+        player_dice_count_history: list[list[int]],
+        all_rounds_actions: list[list[actions.Action]],
+        dice_reveal_history: list[list[collections.Counter[int]]],
     ) -> actions.Action:
         num_other_dice = num_dice_in_play - len(self.cur_dice)
         if num_other_dice == 0:
             return actions.InvalidAction('NO BASE', "No other players have dice")
+
         if is_single_die_round:
             non_wild_avg_count = 2*num_other_dice / common.NUM_FACES
-            #avg_wild_count = num_other_dice/NUM_FACES
         else:
             non_wild_avg_count = num_other_dice / common.NUM_FACES
-            #avg_wild_count = num_other_dice / NUM_FACES
 
-        if not round_actions:
+        if previous_action is None:
             return self._get_opening_bid(
                 is_single_die_round=is_single_die_round,
                 non_wild_avg_count=non_wild_avg_count,
             )
 
+        assert isinstance(previous_action, actions.Bid)
         return self._get_expected_best_action(
-            round_actions=round_actions,
+            previous_bid=previous_action,
             is_single_die_round=is_single_die_round,
             num_other_dice=num_other_dice,
-            num_players_alive=num_players_alive,
+            num_players_alive=sum(count != 0 for count in player_dice_count_history[-1]),
         )

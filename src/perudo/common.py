@@ -6,12 +6,14 @@ import dataclasses
 import json
 import random
 import traceback
+import types
 import typing as ty
 
 WILD_FACE_VAL = 1
 MIN_FACE_VAL = 1
 MAX_FACE_VAL = 6
 NUM_FACES = MAX_FACE_VAL - MIN_FACE_VAL + 1
+STARTING_NUM_DICE = 5
 assert NUM_FACES > 1, "Can't have only one face"
 # may remove this restriction later, but some code would have to change
 assert MIN_FACE_VAL <= WILD_FACE_VAL <= MAX_FACE_VAL, "Wild card must be in range"
@@ -134,10 +136,10 @@ def _is_instance_of_typehint(obj: object, hint: ty.Any) -> bool:
             )
         )
 
-    if origin is ty.Union:
+    if origin is types.UnionType or origin is ty.Union:
         return any(_is_instance_of_typehint(obj, arg) for arg in args)
 
-    raise TypeError(f"Unsupported type hint: {hint}")
+    raise TypeError(f"Unsupported type hint: {hint} ({origin=}, {args=})")
 
 @dataclasses.dataclass(frozen=True)
 class BaseFrozen:
@@ -315,7 +317,7 @@ def _to_jsonable_hopefully(thing: object) -> ty.Any:
             for key, value in thing.items()
         }
 
-    if isinstance(thing, (str, float, int, bytes, bool)):
+    if isinstance(thing, (str, float, int, bytes, bool)) or thing is None:
         return thing
 
     raise ConstructionError(f"Can't convert {thing} of type {type(thing).__name__} to jsonable")
@@ -341,7 +343,7 @@ def _from_jsonable(thing: object) -> ty.Any:
             for key, value in thing.items()
         }
 
-    if isinstance(thing, (str, float, int, bytes, bool)):
+    if isinstance(thing, (str, float, int, bytes, bool)) or thing is None:
         return thing
 
     raise ConstructionError(f"Can't convert {thing} of type {type(thing).__name__} from jsonable")

@@ -10,20 +10,19 @@ class Action(common.BaseFrozen):
     """
     All player actions should subclass this
     """
-    ACTION_NAME: ty.ClassVar[str]
     _ACTION_NAME_TO_ACTION_TYPE_D: ty.ClassVar[dict[str, type['Action']]] = {}
 
     @abc.abstractmethod
     def validate(
         self,
-        previous: None | ty.Self,
+        previous_action: None | ty.Self,
         is_single_die_round: bool,
     ) -> 'Action':
         """
         Check if this action was valid in its context, return an InvalidAction
         object if not and itself if so.
 
-        :param previous: Previous action taken
+        :param previous_action: Previous action taken
         :param is_single_die_round: Whether this is a round started by a single die
         :return: The action if it was valid, or an InvalidAction object if not
         """
@@ -40,9 +39,10 @@ class Action(common.BaseFrozen):
 
     @classmethod
     def register_action[T: type['Action']](cls, ToRegister: T) -> T:
-        if ToRegister.ACTION_NAME in cls._ACTION_NAME_TO_ACTION_TYPE_D:
-            raise TypeError(f'Registered Action with name {ToRegister.ACTION_NAME} multiple times')
-        cls._ACTION_NAME_TO_ACTION_TYPE_D[ToRegister.ACTION_NAME] = ToRegister
+
+        if ToRegister.__name__ in cls._ACTION_NAME_TO_ACTION_TYPE_D:
+            raise TypeError(f'Registered Action with name {ToRegister.__name__} multiple times')
+        cls._ACTION_NAME_TO_ACTION_TYPE_D[ToRegister.__name__] = ToRegister
         return ToRegister
 
 
@@ -84,7 +84,7 @@ class EndAction(Action):
     @abc.abstractmethod
     def validate(
         self,
-        previous: None | Action,
+        previous_action: None | Action,
         is_single_die_round: bool,
     ) -> 'EndAction':
         raise NotImplementedError('Implement me bro.')
@@ -118,11 +118,45 @@ class InvalidAction(EndAction):
 
     def validate(
         self,
-        previous: None | Action,
+        previous_action: None | Action,
         is_single_die_round: bool,
     ) -> 'EndAction':
         return self
 
+@dataclasses.dataclass(frozen=True)
+class NoOp(Action):
+    """
+    Player took no action - see subclasses for reasons why
+    """
+    @classmethod
+    def get_from_human(cls, fixed_face:int | None) -> ty.Self:
+        return cls()
+
+    def validate(
+        self,
+        previous_action: None | Action,
+        is_single_die_round: bool,
+    ) -> Action:
+        # Todo: should this be always invalid instead?
+        raise RuntimeError(f'{type(self).__name__} should not call validate')
+
+@dataclasses.dataclass(frozen=True)
+class NoOpFirstTurnSkip(NoOp):
+    """
+    NoOp for alignment - if the first player is index 2, players 0 and 1
+    automatically do this action. This keeps the actions aligned by player index
+
+    subclass of NoOp so isinstance(action, NoOp) is True
+    """
+
+@dataclasses.dataclass(frozen=True)
+class NoOpDead(NoOp):
+    """
+    Player didn't take an action because they are dead. This action is recorded
+    for action alignment purposes.
+
+    subclass of NoOp so isinstance(action, NoOp) is True
+    """
 
 @Action.register_action
 @dataclasses.dataclass(frozen=True)
@@ -133,7 +167,7 @@ class Bid(Action):
 
     def validate(
         self,
-        previous: None | Action,
+        previous_action: None | Action,
         is_single_die_round: bool,
     ) -> Action:
         # Handle always impossible
@@ -144,7 +178,7 @@ class Bid(Action):
             return InvalidAction(self, "Non-positive Count")
 
         # Handle first bid
-        if previous is None:
+        if previous_action is None:
             if (
                 self.face == 1
                 and not is_single_die_round
@@ -152,14 +186,14 @@ class Bid(Action):
                 return InvalidAction(self, "Invalid Starting Bid")
             return self
 
-        if not isinstance(previous, Bid):
+        if not isinstance(previous_action, Bid):
             return InvalidAction(self, "Following non-bid (should be impossible)")
 
         # Handle following other bids
-        assert isinstance(previous, Bid)
-        min_count = previous.min_next_count(self.face)
+        assert isinstance(previous_action, Bid)
+        min_count = previous_action.min_next_count(self.face)
         if self.count < min_count:
-            return InvalidAction(self, f"Count for face {self.face} must be at least {min_count} (because of {previous=})")
+            return InvalidAction(self, f"Count for face {self.face} must be at least {min_count} (because of {previous_action=})")
 
         return self
 
@@ -195,10 +229,10 @@ class Challenge(EndAction):
     ACTION_NAME: ty.ClassVar[str] = 'Challenge'
     def validate(
         self,
-        previous: None | Action,
+        previous_action: None | Action,
         is_single_die_round: bool,
     ) -> EndAction:
-        if previous is None:
+        if previous_action is None:
             return InvalidAction(self, f"Can't use {self.ACTION_NAME} as opening move")
 
         return self
