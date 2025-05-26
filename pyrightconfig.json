@@ -1,6 +1,6 @@
 {
   "include": ["src"],
-  "exclude": ["perudo_venv", "src/perudo.egg-info"],
+  "exclude": ["*venv*", "src/*.egg-info"],
   "pythonVersion": "3.13",
   "typeCheckingMode": "strict"
 }
