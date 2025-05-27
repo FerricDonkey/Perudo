@@ -417,6 +417,7 @@ class RemotePlayer(pl.PlayerABC):
         self,
         dice: collections.Counter[int]
     ) -> None:
+        super().set_dice(dice=dice)
         try:
             self.sync_send_obj(messaging.SetDice(
                 dice_faces=common.dice_counter_to_list(dice)
@@ -426,6 +427,21 @@ class RemotePlayer(pl.PlayerABC):
             print(
                 f">>> Error communicating with {self.connection.name}: {common.exception_to_str(exc)}\n" 
                 "Player may not have received dice update."
+            )
+
+    def initialize(
+        self,
+        index: int,
+        num_players:int,
+    ) -> None:
+        super().initialize(index=index, num_players=num_players)
+        try:
+            self.sync_send_obj(messaging.Initialize(index=index, num_players=num_players))
+        except Exception as exc:
+            # TODO: Disconnect maybe, and give opportunity to reconnect?
+            print(
+                f">>> Error communicating with {self.connection.name}: {common.exception_to_str(exc)}\n" 
+                "Player may not have received index."
             )
 
 

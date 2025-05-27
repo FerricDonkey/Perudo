@@ -27,7 +27,7 @@ class ClientPlayer:
         """
         Interact with the game until it's over
 
-        # Todo: break into more functions maybe, if I feel like it.
+        # Todo: Change to the registered callback paradigm, if I feel like it.
         """
         while True:
             message = await self.connection.receive_obj()
@@ -40,6 +40,11 @@ class ClientPlayer:
                 print(f"Player {self.player.name} set dice to {message.dice_faces}")
                 self.player.set_dice(
                     common.dice_list_to_counter(message.dice_faces)
+                )
+            elif isinstance(message, messaging.Initialize):
+                self.player.initialize(
+                    index=message.index,
+                    num_players=message.num_players,
                 )
             elif isinstance(message, messaging.ActionRequest):
                 action = self.player.get_action(
@@ -169,4 +174,3 @@ class ClientManager:
 
         await self.send_obj(create_message)
         await player.run_game_loop()
-

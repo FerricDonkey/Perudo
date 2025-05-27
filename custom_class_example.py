@@ -10,6 +10,8 @@ import perudo
 @perudo.PlayerABC.register_constructor
 @dataclasses.dataclass
 class DumbPlayer(perudo.PlayerABC):
+    # Use this decorater if you want to operate on local indexes.
+    # @perudo.PlayerABC.rotate_get_action_args_decorator
     def get_action(
         self,
         previous_action: perudo.Bid | None,

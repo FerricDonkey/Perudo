@@ -1,6 +1,7 @@
 import abc
 import collections
 import dataclasses
+import functools
 import math
 import random
 import typing as ty
@@ -16,6 +17,8 @@ class PlayerABC:
     NAME_TO_TO_PLAYER_CONSTRUCTOR_D: ty.ClassVar[dict[str, PlayerConstructorType]] = {}
 
     name: str
+    global_index: int | None = None  # index in the game order
+    num_players: int | None = None  # number of players in the game. Used for rotation.
     cur_dice: collections.Counter[int] = dataclasses.field(default_factory=collections.Counter[int])
 
     @ty.overload
@@ -88,6 +91,84 @@ class PlayerABC:
         dice_reveal_history: list[list[collections.Counter[int]]],
     ) -> actions.Action:
         raise NotImplementedError('Implement me bro.')
+
+    def rotate_general_list[T](self, to_rotate: list[T]) -> list[T]:
+        """
+        Rotate a list so that the first element the element corresponding to
+        this player (ie the element at index self.global_index) is at the beginning.
+
+        Elements that were before that index are moved to the end
+        """
+        if self.global_index is None or self.num_players is None:
+            raise RuntimeError(
+                "Can't rotate before knowing global index and number of players"
+            )
+
+        if self.global_index == 0:
+            return to_rotate
+
+        return to_rotate[self.global_index:] + to_rotate[:self.global_index]
+
+    def shift_and_pad_list_of_actions(self, to_pad: list[actions.Action]) -> list[actions.Action]:
+        """
+        shift and pad a list of actions so that the first element the element
+        corresponding to this player (ie the element at index self.global_index)
+        is at the beginning.
+        """
+        if self.global_index is None or self.num_players is None:
+            raise RuntimeError(
+                "Can't rotate before knowing global index and number of players"
+            )
+
+        if self.global_index == 0:
+            return to_pad
+
+        pad_amount = (self.num_players - self.global_index) % self.num_players
+        return [actions.NoOpFirstTurnSkip() for _ in range(pad_amount)] + to_pad
+
+    @staticmethod
+    def rotate_get_action_args_decorator[T: ty.Callable[..., actions.Action]](get_action: T) -> T:
+        """
+        Use this decorator on a get_action function so that it always receives
+        things in local coordinates (if you want to).
+
+        DO NOT USE THIS ON A METHOD THAT DOES NOT MATCH THE get_action SIGNATURE.
+        TODO: add some runtime type checking for paranoia, maybe. Or make the
+              static checking better. Something. Or not.
+        """
+        @functools.wraps(get_action)
+        def wrapper(
+            self: PlayerABC,
+            previous_action: actions.Bid | None,
+            is_single_die_round: bool,
+            num_dice_in_play: int,
+            player_dice_count_history: list[list[int]],
+            all_rounds_actions: list[list[actions.Action]],
+            dice_reveal_history: list[list[collections.Counter[int]]],
+        ) -> actions.Action:
+            return get_action(
+                self=self,
+                previous_action=previous_action,
+                is_single_die_round=is_single_die_round,
+                num_dice_in_play=num_dice_in_play,
+                player_dice_count_history=[
+                    self.rotate_general_list(dice_count)
+                    for dice_count in player_dice_count_history
+                ],
+                all_rounds_actions=[
+                    self.shift_and_pad_list_of_actions(round_actions)
+                    for round_actions in all_rounds_actions
+                ],
+                dice_reveal_history=[
+                    self.rotate_general_list(dice_reveal)
+                    for dice_reveal in dice_reveal_history
+                ],
+            )
+        return ty.cast(T, wrapper)  # because type checkers aren't great at messing with arguments
+
+    def initialize(self, index: int, num_players: int) -> None:
+        self.global_index = index
+        self.num_players = num_players
 
     def set_dice(self, dice: collections.Counter[int]) -> None:
         """
