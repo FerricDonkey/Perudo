@@ -369,23 +369,23 @@ class RoundSummary(common.BaseFrozen):
             losers=[player.name for player in losers],
         )
 
-    def print(self, hide_noop:bool=False) -> None:
+    def print(self, hide_noop:bool=True) -> None:
+        pi_pwidth = len(str(len(self.players) - 1))
         print('===================')
-        for player, dice_counts in zip(self.players, self.all_player_dice):
+        for player_index, (player, dice_counts) in enumerate(zip(self.players, self.all_player_dice)):
             num_dice = dice_counts.get_num_dice()
             if num_dice:
-                print(f'  {player} ({num_dice}): {dice_counts.to_str()}')
+                print(f'  {player_index:>{pi_pwidth}} - {player} ({num_dice}): {dice_counts.to_str()}')
             else:
-                print(f'  {player} (0): Dead')
+                print(f'  {player_index:>{pi_pwidth}} - {player} (0): Dead')
         print('  -----------------')
-        action_print_width = len(str(len(self.all_actions)))
+        # action_print_width = len(str(len(self.all_actions)))
         player_print_width = max(len(player) for player in self.players)
-        print(self.all_actions)
         for action_index, action in enumerate(self.all_actions):
             if isinstance(action, actions.NoOp):
                 if hide_noop:
                     continue
-                prefix = "    (  "
+                prefix = "      (  "
                 suffix = "  )"
             else:
                 prefix = ""
@@ -393,7 +393,7 @@ class RoundSummary(common.BaseFrozen):
 
             player = self.players[action_index % len(self.players)]
             print(
-                f'  {prefix}{action_index:>{action_print_width}} - '
+                f'    {prefix}{action_index%len(self.players):>{pi_pwidth}} - '
                 f'{player+':':<{player_print_width+1}} {action}{suffix}'
             )
         print('  -----------------')
@@ -433,7 +433,7 @@ class GameSummary(common.BaseFrozen):
             winner=game.players[winner_index].name,
         )
 
-    def print(self, hide_noop:bool=False) -> None:
+    def print(self, hide_noop:bool=True) -> None:
         print("Game Summary:\n==============")
         for round_index, (
                 round_actions,
