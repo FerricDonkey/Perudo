@@ -332,6 +332,12 @@ def _from_jsonable(thing: object) -> ty.Any:
 
 @dataclasses.dataclass(frozen=True)
 class DiceCounts(BaseFrozen):
+    """
+    Holds the counts of dice faces.
+
+    Uses a list internally with offsets. Doing this instead of a dict for ease
+    of serialization and deserialization, and conversion to tensors for bots.
+    """
     _counts: list[int]
 
     @classmethod
@@ -352,6 +358,18 @@ class DiceCounts(BaseFrozen):
             for face in range(MIN_FACE_VAL, MAX_FACE_VAL + 1):
                 dice_counts[face - MIN_FACE_VAL] += source[face]
         return cls(dice_counts)
+
+    @classmethod
+    def from_dictionary(cls, count_d: dict[int, int]) -> ty.Self:
+        """
+        Primarily for making manual creation for tests or similar easier
+
+        :param count_d: dictionary from face to count.
+        """
+        counts_l = [0 for _ in range(NUM_FACES)]
+        for face, count in count_d.items():
+            counts_l[face - MIN_FACE_VAL] = count
+        return cls(counts_l)
 
     def __getitem__(self, face: int) -> int:
         return self._counts[face - MIN_FACE_VAL]

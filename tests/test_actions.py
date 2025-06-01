@@ -45,11 +45,11 @@ def test_bid_min_next_count_wild_base() -> None:
 
 def test_challenge_success() -> None:
     previous = actions.Bid(face=3, count=2)
-    dice = [3, 3, 2, 6]
+    dice_counts = common.DiceCounts.from_dictionary({3:2, 2:1, 6:1})
     challenge = actions.Challenge()
     losers = challenge.get_losers(
         previous_action=previous,
-        all_dice_counts=dice,
+        all_dice_counts=dice_counts,
         is_single_die_round=False,
         caller=0,
         previous_player=1,
@@ -59,11 +59,11 @@ def test_challenge_success() -> None:
 
 def test_challenge_failure() -> None:
     previous = actions.Bid(face=3, count=3)
-    dice = [3, 2, 2, 6]
+    dice_counts = common.DiceCounts.from_dictionary({3:1, 2:2, 6:1})
     challenge = actions.Challenge()
     losers = challenge.get_losers(
         previous_action=previous,
-        all_dice_counts=dice,
+        all_dice_counts=dice_counts,
         is_single_die_round=False,
         caller=0,
         previous_player=1,
@@ -73,11 +73,11 @@ def test_challenge_failure() -> None:
 
 def test_exact_success_no_wild() -> None:
     previous = actions.Bid(face=2, count=2)
-    dice = [3, 2, 2, 6]
+    dice_counts = common.DiceCounts.from_dictionary({3:1, 2:2, 6:1})
     exact = actions.Exact()
     losers = exact.get_losers(
         previous_action=previous,
-        all_dice=dice,
+        all_dice_counts=dice_counts,
         is_single_die_round=False,
         caller=0,
         previous_player=4,
@@ -87,11 +87,11 @@ def test_exact_success_no_wild() -> None:
 
 def test_exact_success_with_wild() -> None:
     previous = actions.Bid(face=2, count=2)
-    dice = [3, 2, 1, 6]
+    dice_counts = common.DiceCounts.from_dictionary({3:1, 2:1, 1:1, 6:1})
     exact = actions.Exact()
     losers = exact.get_losers(
         previous_action=previous,
-        all_dice=dice,
+        all_dice_counts=dice_counts,
         is_single_die_round=False,
         caller=0,
         previous_player=4,
@@ -101,11 +101,11 @@ def test_exact_success_with_wild() -> None:
 
 def test_exact_success_disabled_wild() -> None:
     previous = actions.Bid(face=2, count=2)
-    dice = [1, 2, 2, 6]
+    dice_counts = common.DiceCounts.from_dictionary({1:1, 2:2, 6:1})
     exact = actions.Exact()
     losers = exact.get_losers(
         previous_action=previous,
-        all_dice=dice,
+        all_dice_counts=dice_counts,
         is_single_die_round=True,
         caller=0,
         previous_player=4,
@@ -115,11 +115,11 @@ def test_exact_success_disabled_wild() -> None:
 
 def test_exact_failure_no_wild() -> None:
     previous = actions.Bid(face=3, count=2)
-    dice = [3, 2, 2, 6]
+    dice_counts = common.DiceCounts.from_dictionary({3:1, 2:2, 6:1})
     exact = actions.Exact()
     losers = exact.get_losers(
         previous_action=previous,
-        all_dice=dice,
+        all_dice_counts=dice_counts,
         is_single_die_round=False,
         caller=0,
         previous_player=4,
@@ -129,11 +129,11 @@ def test_exact_failure_no_wild() -> None:
 
 def test_exact_failure_with_wild() -> None:
     previous = actions.Bid(face=3, count=2)
-    dice = [3, 3, 1, 6]
+    dice_counts = common.DiceCounts.from_dictionary({3:2, 1:1, 6:1})
     exact = actions.Exact()
     losers = exact.get_losers(
         previous_action=previous,
-        all_dice=dice,
+        all_dice_counts=dice_counts,
         is_single_die_round=False,
         caller=0,
         previous_player=4,
@@ -143,11 +143,11 @@ def test_exact_failure_with_wild() -> None:
 
 def test_exact_failure_disabled_wild() -> None:
     previous = actions.Bid(face=3, count=2)
-    dice = [3, 1, 2, 6]
+    dice_counts = common.DiceCounts.from_dictionary({3:1, 2:1, 1:1, 6:1})
     exact = actions.Exact()
     losers = exact.get_losers(
         previous_action=previous,
-        all_dice=dice,
+        all_dice_counts=dice_counts,
         is_single_die_round=True,
         caller=0,
         previous_player=4,
