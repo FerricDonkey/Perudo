@@ -319,10 +319,7 @@ class PerudoGame:
         :return: winning player index
         """
         for player_index, player in enumerate(self.players):
-            player.initialize(
-                index=player_index,
-                num_players=len(self.players),
-            )
+            player.set_index(index=player_index)
         if randomize_starting_player:
             first_player_index = random.randrange(len(self.players))
         else:

@@ -69,6 +69,7 @@ def get_random_non_wild_face() -> int:
         face = get_random_face()
     return face
 
+
 # pyright: reportUnknownVariableType=false, reportUnknownArgumentType=false
 def _is_instance_of_typehint(obj: object, hint: ty.Any) -> bool:
     """

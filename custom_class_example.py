@@ -10,7 +10,7 @@ import perudo
 @dataclasses.dataclass
 class DumbPlayer(perudo.PlayerABC):
     # Use this decorater if you want to operate on local indexes.
-    # @perudo.PlayerABC.rotate_get_action_args_decorator
+    @perudo.PlayerABC.rotate_get_action_args_decorator
     def get_action(self, observation: perudo.ActionObservation) -> perudo.Action:
         # Note that this is not always legal. This is on purpose, to demonstrate
         # that the game tolerates custom classes that make illegal moves.

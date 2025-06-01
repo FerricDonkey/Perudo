@@ -39,11 +39,8 @@ class ClientPlayer:
             elif isinstance(message, messaging.SetDice):
                 print(f"Player {self.player.name} set dice to {message.dice_counts}")
                 self.player.set_dice(message.dice_counts)
-            elif isinstance(message, messaging.Initialize):
-                self.player.initialize(
-                    index=message.index,
-                    num_players=message.num_players,
-                )
+            elif isinstance(message, messaging.SetIndex):
+                self.player.set_index(index=message.index,)
             elif isinstance(message, messaging.GetActionRequest):
                 action = self.player.get_action(message.observation)
                 await self.connection.send_obj(action)

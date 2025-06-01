@@ -29,6 +29,55 @@ class ActionObservation(common.BaseFrozen):
     all_rounds_actions: list[list[actions.Action]]
     dice_reveal_history: list[list[common.DiceCounts]]
 
+    def rotate[T: 'ActionObservation'](self: T, index_to_zero: int) -> T:
+        return type(self)(
+            previous_action=self.previous_action,
+            is_single_die_round=self.is_single_die_round,
+            num_players=self.num_players,
+            num_living_players=self.num_living_players,
+            num_dice_in_play=self.num_dice_in_play,
+            num_dice_by_player_history=[
+                self.rotate_list(to_rotate, index_to_zero)
+                for to_rotate in self.num_dice_by_player_history
+            ],
+            all_rounds_actions=[
+                self.pad_rotate_list_of_actions(
+                    to_pad=to_pad,
+                    index_to_zero=index_to_zero,
+                    num_players=self.num_players,
+                )
+                for to_pad in self.all_rounds_actions
+            ],
+            dice_reveal_history=[
+                self.rotate_list(to_rotate, index_to_zero)
+                for to_rotate in self.dice_reveal_history
+            ],
+        )
+
+    @staticmethod
+    def rotate_list[T](to_rotate: list[T], index_to_zero: int) -> list[T]:
+        """
+        Rotate a list so that the element at index index_to_zero is at the beginning.
+
+        :param to_rotate:
+        :param index_to_zero:
+        :return:
+        """
+        return to_rotate[index_to_zero:] + to_rotate[:index_to_zero]
+
+    @staticmethod
+    def pad_rotate_list_of_actions(
+        to_pad: list[actions.Action],
+        index_to_zero: int,
+        num_players: int,
+    ) -> list[actions.Action]:
+        """
+        pad a list of actions so that the element at index index_to_zero
+        is at index 0 MOD num_players.
+        """
+        pad_amount = (num_players - index_to_zero) % num_players
+        return [actions.NoOpFirstTurnSkip() for _ in range(pad_amount)] + to_pad
+
 
 @dataclasses.dataclass(kw_only=True)
 class PlayerABC:
@@ -36,7 +85,6 @@ class PlayerABC:
 
     name: str
     global_index: int | None = None  # index in the game order
-    num_players: int | None = None  # number of players in the game. Used for rotation.
     dice_counts: common.DiceCounts = common.DiceCounts.from_empty()
 
     @ty.overload
@@ -102,83 +150,26 @@ class PlayerABC:
     def get_action(self, observation: ActionObservation) -> actions.Action:
         raise NotImplementedError('Implement me bro.')
 
-    def rotate_general_list[T](self, to_rotate: list[T]) -> list[T]:
-        """
-        Rotate a list so that the first element the element corresponding to
-        this player (ie the element at index self.global_index) is at the beginning.
-
-        Elements that were before that index are moved to the end
-        """
-        if self.global_index is None or self.num_players is None:
-            raise RuntimeError(
-                "Can't rotate before knowing global index and number of players"
-            )
-
-        if self.global_index == 0:
-            return to_rotate
-
-        return to_rotate[self.global_index:] + to_rotate[:self.global_index]
-
-    def shift_and_pad_list_of_actions(self, to_pad: list[actions.Action]) -> list[actions.Action]:
-        """
-        shift and pad a list of actions so that the first element the element
-        corresponding to this player (ie the element at index self.global_index)
-        is at the beginning.
-        """
-        if self.global_index is None or self.num_players is None:
-            raise RuntimeError(
-                "Can't rotate before knowing global index and number of players"
-            )
-
-        if self.global_index == 0:
-            return to_pad
-
-        pad_amount = (self.num_players - self.global_index) % self.num_players
-        return [actions.NoOpFirstTurnSkip() for _ in range(pad_amount)] + to_pad
-
     @staticmethod
-    def rotate_get_action_args_decorator[T: ty.Callable[..., actions.Action]](get_action: T) -> T:
+    def rotate_get_action_args_decorator[T: ty.Callable](get_action: T) ->T:
         """
         Use this decorator on a get_action function so that it always receives
         things in local coordinates (if you want to).
 
         DO NOT USE THIS ON A METHOD THAT DOES NOT MATCH THE get_action SIGNATURE.
-        TODO: add some runtime type checking for paranoia, maybe. Or make the
-              static checking better. Something. Or not.
+        TODO: fix type hints
         """
         @functools.wraps(get_action)
-        def wrapper(
-            self: PlayerABC,
-            previous_action: actions.Bid | None,
-            is_single_die_round: bool,
-            num_dice_in_play: int,
-            player_dice_count_history: list[list[int]],
-            all_rounds_actions: list[list[actions.Action]],
-            dice_reveal_history: list[list[collections.Counter[int]]],
-        ) -> actions.Action:
-            return get_action(
-                self=self,
-                previous_action=previous_action,
-                is_single_die_round=is_single_die_round,
-                num_dice_in_play=num_dice_in_play,
-                player_dice_count_history=[
-                    self.rotate_general_list(dice_count)
-                    for dice_count in player_dice_count_history
-                ],
-                all_rounds_actions=[
-                    self.shift_and_pad_list_of_actions(round_actions)
-                    for round_actions in all_rounds_actions
-                ],
-                dice_reveal_history=[
-                    self.rotate_general_list(dice_reveal)
-                    for dice_reveal in dice_reveal_history
-                ],
-            )
-        return ty.cast(T, wrapper)  # because type checkers aren't great at messing with arguments
+        def wrapper(self: 'PlayerABC', observation: ActionObservation) -> actions.Action:
+            assert self.global_index is not None, "Can't rotate get_action if self.global_index is None"
+            return ty.cast(actions.Action, get_action(
+                self,
+                observation.rotate(index_to_zero=self.global_index),
+            ))
+        return ty.cast(T, wrapper)
 
-    def initialize(self, index: int, num_players: int) -> None:
+    def set_index(self, index: int) -> None:
         self.global_index = index
-        self.num_players = num_players
 
     def set_dice(self, dice_counts: common.DiceCounts) -> None:
         """

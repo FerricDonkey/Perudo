@@ -195,12 +195,11 @@ class SetDice(common.BaseFrozen):
     dice_counts: common.DiceCounts
 
 @dataclasses.dataclass(frozen=True)
-class Initialize(common.BaseFrozen):
+class SetIndex(common.BaseFrozen):
     """
     Tell a player what their index is in the game order, and how many players there are
     """
     index: int
-    num_players: int
 
 @dataclasses.dataclass(frozen=True)
 class RoomsListResponse(common.BaseFrozen):

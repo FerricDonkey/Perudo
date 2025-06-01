@@ -405,14 +405,10 @@ class RemotePlayer(pl.PlayerABC):
                 "Player may not have received dice update."
             )
 
-    def initialize(
-        self,
-        index: int,
-        num_players:int,
-    ) -> None:
-        super().initialize(index=index, num_players=num_players)
+    def set_index(self, index: int,) -> None:
+        super().set_index(index=index)
         try:
-            self.sync_send_obj(messaging.Initialize(index=index, num_players=num_players))
+            self.sync_send_obj(messaging.SetIndex(index=index))
         except Exception as exc:
             # TODO: Disconnect maybe, and give opportunity to reconnect?
             print(
