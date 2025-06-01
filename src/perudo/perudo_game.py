@@ -15,7 +15,6 @@ Key game rules:
 - Last player with dice wins
 """
 
-import collections
 import dataclasses
 import random
 import typing as ty
@@ -23,10 +22,6 @@ import typing as ty
 from perudo import common
 from perudo import actions
 from perudo import players as pl
-
-
-def dice_to_str(dice_counter: collections.Counter[int]) -> str:
-    return ', '.join(f'{face}: {value}' for face, value in sorted(dice_counter.items()))
 
 
 @dataclasses.dataclass
@@ -50,11 +45,11 @@ class PerudoGame:
     and I'm leaving it until I get around to replacing it with something more compact.
     """
     players: list[pl.PlayerABC]
-    player_dice_count_history: list[list[int]] = dataclasses.field(default_factory=list[list[int]])
+    num_dice_by_player_history: list[list[int]] = dataclasses.field(default_factory=list[list[int]])
     cur_player_index: int = -1
     cur_round_single_die: bool = False
     all_rounds_actions: list[list[actions.Action]] = dataclasses.field(default_factory=list[list[actions.Action]])
-    all_rounds_dice: list[list[collections.Counter[int]]] = dataclasses.field(default_factory=list[list[collections.Counter[int]]])
+    all_rounds_dice_counts: list[list[common.DiceCounts]] = dataclasses.field(default_factory=list[list[common.DiceCounts]])
     all_rounds_losers: list[list[int]] = dataclasses.field(default_factory=list[list[int]])
     single_die_round_history: list[bool] = dataclasses.field(default_factory=list[bool])
     print_while_playing: bool = False
@@ -76,19 +71,18 @@ class PerudoGame:
         return self.all_rounds_actions[-1]
 
     @property
-    def current_round_dice_by_player(self) -> list[collections.Counter[int]]:
+    def current_round_dice_by_player(self) -> list[common.DiceCounts]:
         if not self.all_rounds_actions:
             raise RuntimeError('No current round')
-        return self.all_rounds_dice[-1]
+        return self.all_rounds_dice_counts[-1]
 
-    @property
-    def previous_living_player_index(self) -> int:
+    def get_previous_living_player_index(self) -> int:
         """
         Raises an error if no player (excluding the current player) has any
         dice
         """
         prev_index = (self.cur_player_index - 1) % len(self.players)
-        while self.player_dice_count_history[-1][prev_index] == 0:
+        while self.num_dice_by_player_history[-1][prev_index] == 0:
             if prev_index == self.cur_player_index:
                 raise RuntimeError("previous_living_player_index used when there wasn't one")
             prev_index = (prev_index - 1) % len(self.players)
@@ -100,9 +94,9 @@ class PerudoGame:
         dice
         """
         next_index = (self.cur_player_index + 1) % len(self.players)
-        while self.player_dice_count_history[-1][next_index] == 0:
+        while self.num_dice_by_player_history[-1][next_index] == 0:
             if next_index == self.cur_player_index:
-                raise RuntimeError("next_living_player_index used when there wasn't one")
+                raise RuntimeError("get_next_living_player_index used when there wasn't one")
             next_index = (next_index + 1) % len(self.players)
         return next_index
 
@@ -126,7 +120,7 @@ class PerudoGame:
         if not (0 <= first_player_index < len(self.players)):
             raise RuntimeError(f'Invalid first_player_index {first_player_index} (Out of range)')
 
-        if self.player_dice_count_history[-1][first_player_index] < 1:
+        if self.num_dice_by_player_history[-1][first_player_index] < 1:
             raise RuntimeError(f'Invalid first_player_index {first_player_index} (does not have dice)')
 
         self.single_die_round_history.append(single_die_round)
@@ -134,17 +128,14 @@ class PerudoGame:
         self.all_rounds_actions.append([actions.NoOpFirstTurnSkip() for _ in range(first_player_index)])
         self.cur_player_index = first_player_index
 
-        self.all_rounds_dice.append([])
-        for player, num_dice in zip(self.players, self.player_dice_count_history[-1]):
-            dice = collections.Counter(random.choices(  # sorted makes display nicer
-                range(common.MIN_FACE_VAL, common.MAX_FACE_VAL),
-                k=num_dice
-            ))
-            player.set_dice(dice)
-            self.current_round_dice_by_player.append(dice)
+        self.all_rounds_dice_counts.append([])
+        for player, num_dice in zip(self.players, self.num_dice_by_player_history[-1]):
+            dice_counts=common.DiceCounts.from_random(num_dice=num_dice)
+            player.set_dice(dice_counts)
+            self.current_round_dice_by_player.append(dice_counts)
 
         if self.print_while_playing:
-            print(f"\nStarting new round ({single_die_round=} num_dice_in_play={sum(self.player_dice_count_history[-1])}):\n====================")
+            print(f"\nStarting new round ({single_die_round=} num_dice_in_play={sum(self.num_dice_by_player_history[-1])}):\n====================")
             for player_index, (
                 player,
                 player_dice,
@@ -152,12 +143,12 @@ class PerudoGame:
             ) in enumerate(zip(
                 self.players,
                 self.current_round_dice_by_player,
-                self.player_dice_count_history[-1]
+                self.num_dice_by_player_history[-1]
             )):
                 if not self.print_non_human_dice and not isinstance(player, pl.HumanPlayer):
                     dice_str = "MASKED"
                 else:
-                    dice_str = dice_to_str(player_dice)
+                    dice_str = player_dice.to_str()
 
                 if player_index == first_player_index:
                     first_indicator = " <-------- First"
@@ -182,15 +173,15 @@ class PerudoGame:
         :return: Whether there's a next round
         """
         self.all_rounds_losers.append(sorted(loser_indexes))
-        self.player_dice_count_history.append(self.player_dice_count_history[-1].copy())
+        self.num_dice_by_player_history.append(self.num_dice_by_player_history[-1].copy())
         for index in loser_indexes:
-            self.player_dice_count_history[-1][index] = max(0, self.player_dice_count_history[-1][index] - 1)
+            self.num_dice_by_player_history[-1][index] = max(0, self.num_dice_by_player_history[-1][index] - 1)
 
         # Start a new round if multiple people are still alive
-        if sum(num > 0 for num in self.player_dice_count_history[-1]) > 1:
+        if sum(num > 0 for num in self.num_dice_by_player_history[-1]) > 1:
             losers_with_dice = [
                 index for index in loser_indexes
-                if self.player_dice_count_history[-1][index] > 0
+                if self.num_dice_by_player_history[-1][index] > 0
             ]
             # TODO: Is this right?
             if losers_with_dice:
@@ -198,7 +189,7 @@ class PerudoGame:
             else:
                 next_player = self.get_next_living_player_index()
             if any(
-                self.player_dice_count_history[-1][index] == 1
+                self.num_dice_by_player_history[-1][index] == 1
                 for index in losers_with_dice
             ):
                 single_die_round = True
@@ -231,17 +222,24 @@ class PerudoGame:
         """
         returns True if the game continues, False if not
         """
-        if self.player_dice_count_history[-1][self.cur_player_index] == 0:
+        if self.num_dice_by_player_history[-1][self.cur_player_index] == 0:
             raise RuntimeError(f"Player index {self.cur_player_index} has no dice left")
         previous_action = self.get_most_recent_non_noop_action()
-        action = self.players[self.cur_player_index].get_action(
+        num_living_players = sum(
+            num_dice != 0
+            for num_dice in self.num_dice_by_player_history[-1]
+        )
+        observation = pl.ActionObservation(
             previous_action=previous_action,
             is_single_die_round=self.cur_round_single_die,
-            num_dice_in_play=sum(self.player_dice_count_history[-1]),
-            player_dice_count_history=self.player_dice_count_history,
+            num_players=len(self.players),
+            num_living_players=num_living_players,
+            num_dice_in_play=sum(self.num_dice_by_player_history[-1]),
+            num_dice_by_player_history=self.num_dice_by_player_history,
             all_rounds_actions=self.all_rounds_actions,
-            dice_reveal_history=self.all_rounds_dice[:-1],  # do not send the current rounds dice
+            dice_reveal_history=self.all_rounds_dice_counts[:-1],
         )
+        action = self.players[self.cur_player_index].get_action(observation=observation)
 
         # Check if the action was valid. Will be an InvalidAction object if not
         action = action.validate(
@@ -254,22 +252,18 @@ class PerudoGame:
 
         # Handle round ending actions (including InvalidActions)
         if isinstance(action, actions.EndAction):
-            all_dice = [
-                die
-                for player_dice in self.current_round_dice_by_player
-                for die in player_dice
-            ]
+            all_dice = common.DiceCounts.from_multi_counts(self.current_round_dice_by_player)
             other_living_players = [
                 player_index
-                for player_index, num_dice in enumerate(self.player_dice_count_history[-1])
+                for player_index, num_dice in enumerate(self.num_dice_by_player_history[-1])
                 if player_index != self.cur_player_index and num_dice > 0
             ]
             losers = action.get_losers(
                 previous_action=previous_action,
-                all_dice=all_dice,
+                all_dice_counts=all_dice,
                 is_single_die_round=self.cur_round_single_die,
                 caller=self.cur_player_index,
-                previous_player=self.previous_living_player_index,
+                previous_player=self.get_previous_living_player_index(),
                 other_players=other_living_players,
             )
             if self.print_while_playing:
@@ -303,7 +297,7 @@ class PerudoGame:
 
         return cls(
             players=players,
-            player_dice_count_history=[[common.STARTING_NUM_DICE for _ in players]],
+            num_dice_by_player_history=[[common.STARTING_NUM_DICE for _ in players]],
             print_while_playing=print_while_playing,
             print_non_human_dice=print_non_human_dice,
         )
@@ -359,7 +353,7 @@ class RoundSummary(common.BaseFrozen):
     so desire.
     """
     players: list[str]
-    all_player_dice: list[list[int]]
+    all_player_dice: list[common.DiceCounts]
     all_actions: list[actions.Action]
     single_die_round: bool
     losers: list[str]
@@ -372,10 +366,7 @@ class RoundSummary(common.BaseFrozen):
     ) -> ty.Self:
         return cls(
             players=[player.name for player in game.players],
-            all_player_dice=[
-                common.dice_counter_to_list(dice)
-                for dice in game.all_rounds_dice[-1]
-            ],
+            all_player_dice=game.all_rounds_dice_counts[-1],
             all_actions=game.all_rounds_actions[-1],
             single_die_round=game.single_die_round_history[-1],
             losers=[player.name for player in losers],
@@ -383,9 +374,10 @@ class RoundSummary(common.BaseFrozen):
 
     def print(self, hide_noop:bool=False) -> None:
         print('===================')
-        for player, dice in zip(self.players, self.all_player_dice):
-            if dice:
-                print(f'  {player} ({len(dice)}): {dice_to_str(common.dice_list_to_counter(dice))}')
+        for player, dice_counts in zip(self.players, self.all_player_dice):
+            num_dice = dice_counts.get_num_dice()
+            if num_dice:
+                print(f'  {player} ({num_dice}): {dice_counts.to_str()}')
             else:
                 print(f'  {player} (0): Dead')
         print('  -----------------')
@@ -417,7 +409,7 @@ class GameSummary(common.BaseFrozen):
     network via standard send_obj methods.
     """
     all_rounds_actions: list[list[actions.Action]]
-    all_rounds_dice: list[list[list[int]]]
+    all_rounds_dice: list[list[common.DiceCounts]]
     players: list[str]
     all_rounds_losers: list[list[str]]
     single_die_round_history: list[bool]
@@ -431,10 +423,7 @@ class GameSummary(common.BaseFrozen):
     ) -> ty.Self:
         return cls(
             all_rounds_actions=game.all_rounds_actions,
-            all_rounds_dice=[
-                [common.dice_counter_to_list(dice) for dice in round_dice]
-                for round_dice in game.all_rounds_dice
-            ],
+            all_rounds_dice=game.all_rounds_dice_counts,
             players=[player.name for player in game.players],
             all_rounds_losers=[
                 [

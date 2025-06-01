@@ -49,7 +49,7 @@ def test_challenge_success() -> None:
     challenge = actions.Challenge()
     losers = challenge.get_losers(
         previous_action=previous,
-        all_dice=dice,
+        all_dice_counts=dice,
         is_single_die_round=False,
         caller=0,
         previous_player=1,
@@ -63,7 +63,7 @@ def test_challenge_failure() -> None:
     challenge = actions.Challenge()
     losers = challenge.get_losers(
         previous_action=previous,
-        all_dice=dice,
+        all_dice_counts=dice,
         is_single_die_round=False,
         caller=0,
         previous_player=1,

@@ -37,27 +37,15 @@ class ClientPlayer:
             elif isinstance(message, messaging.NoOpMessage):
                 pass
             elif isinstance(message, messaging.SetDice):
-                print(f"Player {self.player.name} set dice to {message.dice_faces}")
-                self.player.set_dice(
-                    common.dice_list_to_counter(message.dice_faces)
-                )
+                print(f"Player {self.player.name} set dice to {message.dice_counts}")
+                self.player.set_dice(message.dice_counts)
             elif isinstance(message, messaging.Initialize):
                 self.player.initialize(
                     index=message.index,
                     num_players=message.num_players,
                 )
-            elif isinstance(message, messaging.ActionRequest):
-                action = self.player.get_action(
-                    previous_action=message.previous_action,
-                    is_single_die_round=message.is_single_die_round,
-                    num_dice_in_play=message.num_dice_in_play,
-                    player_dice_count_history=message.player_dice_count_history,
-                    all_rounds_actions=message.all_rounds_actions,
-                    dice_reveal_history=[
-                        [common.dice_list_to_counter(dice_l) for dice_l in reveal_round]
-                        for reveal_round in message.dice_reveal_history_listified
-                    ],
-                )
+            elif isinstance(message, messaging.GetActionRequest):
+                action = self.player.get_action(message.observation)
                 await self.connection.send_obj(action)
             elif isinstance(message, pg.RoundSummary):
                 # Only does things if the Player subclass does so.

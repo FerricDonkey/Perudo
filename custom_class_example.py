@@ -2,7 +2,6 @@
 Silly Example of using a custom player class
 """
 
-import collections
 import dataclasses
 
 import perudo
@@ -12,15 +11,7 @@ import perudo
 class DumbPlayer(perudo.PlayerABC):
     # Use this decorater if you want to operate on local indexes.
     # @perudo.PlayerABC.rotate_get_action_args_decorator
-    def get_action(
-        self,
-        previous_action: perudo.Bid | None,
-        is_single_die_round: bool,
-        num_dice_in_play: int,
-        player_dice_count_history: list[list[int]],
-        all_rounds_actions: list[list[perudo.Action]],
-        dice_reveal_history: list[list[collections.Counter[int]]],
-    ) -> perudo.Action:
+    def get_action(self, observation: perudo.ActionObservation) -> perudo.Action:
         # Note that this is not always legal. This is on purpose, to demonstrate
         # that the game tolerates custom classes that make illegal moves.
         return perudo.Bid(face=3, count=3)

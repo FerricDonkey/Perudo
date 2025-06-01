@@ -23,31 +23,8 @@ assert WILD_FACE_VAL == MIN_FACE_VAL, "Wild card must be first"  # TODO fix bid 
 def validate_face(face: int) -> bool:
     return MIN_FACE_VAL <= face <= MAX_FACE_VAL
 
-
 def exception_to_str(exception: Exception) -> str:
     return ''.join(traceback.format_exception(type(exception), exception, exception.__traceback__))
-
-
-def dice_counter_to_list(dice: collections.Counter[int]) -> list[int]:
-    """
-    Take a dice counter (eg {1:2} means 2 1s) and return a list of faces.
-
-    This is necessary because dataclasses.asdict doesn't work on Counters, and
-    also json dumping dictionaries with integer keys converts them to strings.
-    """
-    return sorted([
-        face
-        for face, count in dice.items()
-        for _ in range(count)
-    ])
-
-
-def dice_list_to_counter(dice: list[int]) -> collections.Counter[int]:
-    """
-    take a list of faces and return a counter of faces.
-    """
-    return collections.Counter(dice)
-
 
 class ConstructionError(Exception):
     """
@@ -221,7 +198,11 @@ class BaseFrozen:
                     continue
 
                 FieldType = field_name_to_type_d[field_name]
-                if isinstance(FieldType, type) and issubclass(FieldType, BaseFrozen):
+                if (
+                    isinstance(FieldType, type)
+                    and issubclass(FieldType, BaseFrozen)
+                    and not isinstance(value, FieldType)  # TODO: I'm not sure why constructed BaseFrozens are getting in here, figure that out and decide if it's good
+                ):
                     if not isinstance(value, dict):
                         errors.append(
                             f"Field {field_name} in input_d to {cls.__name__} expected "
@@ -347,3 +328,40 @@ def _from_jsonable(thing: object) -> ty.Any:
         return thing
 
     raise ConstructionError(f"Can't convert {thing} of type {type(thing).__name__} from jsonable")
+
+
+@dataclasses.dataclass(frozen=True)
+class DiceCounts(BaseFrozen):
+    _counts: list[int]
+
+    @classmethod
+    def from_empty(cls) -> ty.Self:
+        return cls([0 for _ in range(NUM_FACES)])
+
+    @classmethod
+    def from_random(cls, num_dice: int) -> ty.Self:
+        dice_counts = [0 for _ in range(NUM_FACES)]
+        for _ in range(num_dice):
+            dice_counts[get_random_face() - MIN_FACE_VAL] += 1
+        return cls(dice_counts)
+
+    @classmethod
+    def from_multi_counts(cls, dice_counts_s: ty.Iterable[ty.Self]) -> ty.Self:
+        dice_counts = [0 for _ in range(NUM_FACES)]
+        for source in dice_counts_s:
+            for face in range(MIN_FACE_VAL, MAX_FACE_VAL + 1):
+                dice_counts[face - MIN_FACE_VAL] += source[face]
+        return cls(dice_counts)
+
+    def __getitem__(self, face: int) -> int:
+        return self._counts[face - MIN_FACE_VAL]
+
+    def get_num_dice(self) -> int:
+        return sum(self._counts)
+
+    def to_str(self) -> str:
+        return ', '.join(
+            f'{face}: {value}'
+            for face, value in enumerate(self._counts, start=MIN_FACE_VAL)
+            if value != 0
+        )

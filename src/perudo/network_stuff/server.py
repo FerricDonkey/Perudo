@@ -5,7 +5,6 @@ server
 
 import abc
 import asyncio
-import collections
 import concurrent.futures
 import contextlib
 import dataclasses
@@ -378,27 +377,9 @@ class RemotePlayer(pl.PlayerABC):
     def send_game_summary(self, game_summary: pg.GameSummary) -> None:
         self.sync_send_obj(game_summary)
 
-    def get_action(
-        self,
-        previous_action: actions.Bid | None,
-        is_single_die_round: bool,
-        num_dice_in_play: int,
-        player_dice_count_history: list[list[int]],
-        all_rounds_actions: list[list[actions.Action]],
-        dice_reveal_history: list[list[collections.Counter[int]]],
-    ) -> actions.Action:
+    def get_action(self, observation: pl.ActionObservation,) -> actions.Action:
         try:
-            self.sync_send_obj(messaging.ActionRequest(
-                previous_action=previous_action,
-                is_single_die_round=is_single_die_round,
-                num_dice_in_play=num_dice_in_play,
-                player_dice_count_history=player_dice_count_history,
-                all_rounds_actions=all_rounds_actions,
-                dice_reveal_history_listified=[
-                    [common.dice_counter_to_list(dice) for dice in dice_round]
-                    for dice_round in dice_reveal_history
-                ],
-            ))
+            self.sync_send_obj(messaging.GetActionRequest(observation=observation))
             putative_action = self.sync_recv_obj()
             if not isinstance(putative_action, actions.Action):
                 return actions.InvalidAction(
@@ -413,15 +394,10 @@ class RemotePlayer(pl.PlayerABC):
                 reason=f"Error communicating with {self.connection.name}: {common.exception_to_str(exc)}",
             )
 
-    def set_dice(
-        self,
-        dice: collections.Counter[int]
-    ) -> None:
-        super().set_dice(dice=dice)
+    def set_dice(self, dice_counts: common.DiceCounts,) -> None:
+        super().set_dice(dice_counts=dice_counts)
         try:
-            self.sync_send_obj(messaging.SetDice(
-                dice_faces=common.dice_counter_to_list(dice)
-            ))
+            self.sync_send_obj(messaging.SetDice(dice_counts=dice_counts,))
         except Exception as exc:
             # TODO: Disconnect maybe, and give opportunity to reconnect?
             print(

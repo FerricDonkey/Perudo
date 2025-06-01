@@ -13,7 +13,7 @@ from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives import serialization
 
 from perudo import common
-from perudo import actions
+from perudo import players as pl
 
 @dataclasses.dataclass(frozen=True)
 class WrappedMessage:
@@ -178,16 +178,11 @@ class Corrupted(common.BaseFrozen):
 ### General Use Messages: FROM SERVER TO CLIENT
 
 @dataclasses.dataclass(frozen=True)
-class ActionRequest(common.BaseFrozen):
+class GetActionRequest(common.BaseFrozen):
     """
     FROM SERVER TO CLIENT: request an action. Client should respond with action
     """
-    previous_action: actions.Bid | None
-    is_single_die_round: bool
-    num_dice_in_play: int
-    player_dice_count_history: list[list[int]]
-    all_rounds_actions: list[list[actions.Action]]
-    dice_reveal_history_listified: list[list[list[int]]]
+    observation: pl.ActionObservation
 
 
 @dataclasses.dataclass(frozen=True)
@@ -197,7 +192,7 @@ class SetDice(common.BaseFrozen):
 
     Sends dice as list rather than counter, for better behavior with json
     """
-    dice_faces: list[int]
+    dice_counts: common.DiceCounts
 
 @dataclasses.dataclass(frozen=True)
 class Initialize(common.BaseFrozen):

@@ -37,6 +37,7 @@ from perudo.actions import (
     EndAction as EndAction,
 )
 from perudo.players import (
+    ActionObservation as ActionObservation,
     PlayerABC as PlayerABC,
     RandomLegalPlayer as RandomLegalPlayer,
     ProbabilisticPlayer as ProbabilisticPlayer,
@@ -57,4 +58,5 @@ from perudo.common import (
     MIN_FACE_VAL as MIN_FACE_VAL,
     NUM_FACES as NUM_FACES,
     STARTING_NUM_DICE as STARTING_NUM_DICE,
+    DiceCounts as DiceCounts,
 )

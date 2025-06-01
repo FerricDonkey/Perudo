@@ -55,7 +55,7 @@ class EndAction(Action):
     def get_losers[T](
         self,
         previous_action: Action | None,
-        all_dice: ty.Collection[int],
+        all_dice_counts: common.DiceCounts,
         is_single_die_round: bool,
         caller: T,
         previous_player: T,
@@ -104,7 +104,7 @@ class InvalidAction(EndAction):
     def get_losers[T](
         self,
         previous_action: Action | None,
-        all_dice: ty.Collection[int],
+        all_dice_counts: common.DiceCounts,
         is_single_die_round: bool,
         caller: T,
         previous_player: T,
@@ -240,7 +240,7 @@ class Challenge(EndAction):
     def get_losers[T](
         self,
         previous_action: Action | None,
-        all_dice: ty.Collection[int],
+        all_dice_counts: common.DiceCounts,
         is_single_die_round: bool,
         caller: T,
         previous_player: T,
@@ -253,13 +253,9 @@ class Challenge(EndAction):
             )
             return [caller]
 
-        if is_single_die_round:
-            num_existing = sum(face == previous_action.face for face in all_dice)
-        else:
-            num_existing = sum(
-                face == previous_action.face or face == common.WILD_FACE_VAL
-                for face in all_dice
-            )
+        num_existing = all_dice_counts[previous_action.face]
+        if not is_single_die_round and previous_action.face != common.WILD_FACE_VAL:
+            num_existing += all_dice_counts[common.WILD_FACE_VAL]
 
         if num_existing < previous_action.count:
             return [previous_player]
@@ -276,7 +272,7 @@ class Exact(EndAction):
     def get_losers[T](
         self,
         previous_action: Action | None,
-        all_dice: ty.Collection[int],
+        all_dice_counts: common.DiceCounts,
         is_single_die_round: bool,
         caller: T,
         previous_player: T,
@@ -289,16 +285,11 @@ class Exact(EndAction):
             )
             return [caller]
 
-        if is_single_die_round:
-            num_existing = sum(face == previous_action.face for face in all_dice)
-        else:
-            num_existing = sum(
-                face == previous_action.face or face == common.WILD_FACE_VAL
-                for face in all_dice
-            )
-        #print(f"{num_existing=}, {previous_action.count=}, {all_dice=}")
+        num_existing = all_dice_counts[previous_action.face]
+        if not is_single_die_round and previous_action.face != common.WILD_FACE_VAL:
+            num_existing += all_dice_counts[common.WILD_FACE_VAL]
+
         if num_existing == previous_action.count:
-            #print("WIN")
             return list(other_players)
-        #print("LOSE")
+
         return [caller]

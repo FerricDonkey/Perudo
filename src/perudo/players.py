@@ -6,11 +6,29 @@ import math
 import random
 import typing as ty
 
-from perudo import actions, common
+from perudo import actions
+from perudo import common
+
 if ty.TYPE_CHECKING:
     from perudo.perudo_game import RoundSummary
 
 type PlayerConstructorType = ty.Callable[[str], 'PlayerABC']
+
+
+@dataclasses.dataclass(kw_only=True, frozen=True)
+class ActionObservation(common.BaseFrozen):
+    """
+    The information available to a player to use to get an action
+    """
+    previous_action: actions.Bid | None
+    is_single_die_round: bool
+    num_players: int
+    num_living_players: int
+    num_dice_in_play: int
+    num_dice_by_player_history: list[list[int]]
+    all_rounds_actions: list[list[actions.Action]]
+    dice_reveal_history: list[list[common.DiceCounts]]
+
 
 @dataclasses.dataclass(kw_only=True)
 class PlayerABC:
@@ -19,7 +37,7 @@ class PlayerABC:
     name: str
     global_index: int | None = None  # index in the game order
     num_players: int | None = None  # number of players in the game. Used for rotation.
-    cur_dice: collections.Counter[int] = dataclasses.field(default_factory=collections.Counter[int])
+    dice_counts: common.DiceCounts = common.DiceCounts.from_empty()
 
     @ty.overload
     @classmethod
@@ -81,15 +99,7 @@ class PlayerABC:
         return f"{self.name} ({type(self).__name__})"
 
     @abc.abstractmethod
-    def get_action(
-        self,
-        previous_action: actions.Bid | None,
-        is_single_die_round: bool,
-        num_dice_in_play: int,
-        player_dice_count_history: list[list[int]],
-        all_rounds_actions: list[list[actions.Action]],
-        dice_reveal_history: list[list[collections.Counter[int]]],
-    ) -> actions.Action:
+    def get_action(self, observation: ActionObservation) -> actions.Action:
         raise NotImplementedError('Implement me bro.')
 
     def rotate_general_list[T](self, to_rotate: list[T]) -> list[T]:
@@ -170,11 +180,11 @@ class PlayerABC:
         self.global_index = index
         self.num_players = num_players
 
-    def set_dice(self, dice: collections.Counter[int]) -> None:
+    def set_dice(self, dice_counts: common.DiceCounts) -> None:
         """
         Set the players dice. Makes a copy out of paranoia. Shouldn't matter.
         """
-        self.cur_dice = dice.copy()  # paranoid aliasing prevention - shouldn't ever matter
+        self.dice_counts = dice_counts
 
     @classmethod
     def from_name(cls, name: str) -> ty.Self:
@@ -210,44 +220,34 @@ class HumanPlayer(PlayerABC):
     """
     Gets action from player via use of input
     """
-    def get_action(
-        self,
-        previous_action: actions.Bid | None,
-        is_single_die_round: bool,
-        num_dice_in_play: int,
-        player_dice_count_history: list[list[int]],
-        all_rounds_actions: list[list[actions.Action]],
-        dice_reveal_history: list[list[collections.Counter[int]]],
-    ) -> actions.Action:
-        assert isinstance(previous_action, actions.Bid | None)
-
+    def get_action(self, observation: ActionObservation,) -> actions.Action:
         fixed_face = None
-        if is_single_die_round and isinstance(previous_action, actions.Bid):
-            fixed_face = previous_action.face
+        if observation.is_single_die_round and isinstance(observation.previous_action, actions.Bid):
+            fixed_face = observation.previous_action.face
 
         action: actions.Action
         while True:
-            if previous_action is None:
+            if observation.previous_action is None:
                 action = actions.Bid.get_from_human(fixed_face=fixed_face)
             else:
                 action = actions.Action.get_from_human(fixed_face=fixed_face)
 
             action = action.validate(
-                previous_action=previous_action,
-                is_single_die_round=is_single_die_round,
+                previous_action=observation.previous_action,
+                is_single_die_round=observation.is_single_die_round,
             )
             if isinstance(action, actions.InvalidAction):
                 print(
-                    f"Illegal Action. Must legally follow {previous_action}"
+                    f"Illegal Action. Must legally follow {observation.previous_action}"
                     + f" and use face {fixed_face}" * (fixed_face is not None)
                 )
                 continue
             break
         return action
 
-    def set_dice(self, dice: collections.Counter[int]) -> None:
-        print(f"{self.name} has dice {", ".join(map(str, sorted(dice)))}")
-        super().set_dice(dice)
+    def set_dice(self, dice_counts: common.DiceCounts) -> None:
+        print(f"{self.name} dice - {dice_counts.to_str()}")
+        super().set_dice(dice_counts)
 
 
 @PlayerABC.register_constructor
@@ -264,35 +264,27 @@ class RandomLegalPlayer(PlayerABC):
             return actions.Exact()
         return actions.Challenge()
 
-    def get_action(
-        self,
-        previous_action: actions.Bid | None,
-        is_single_die_round: bool,
-        num_dice_in_play: int,
-        player_dice_count_history: list[list[int]],
-        all_rounds_actions: list[list[actions.Action]],
-        dice_reveal_history: list[list[collections.Counter[int]]],
-    ) -> actions.Action:
-        if previous_action is not None and random.random() < self.end_pct_chance:
+    def get_action(self, observation: ActionObservation,) -> actions.Action:
+        if observation.previous_action is not None and random.random() < self.end_pct_chance:
             return self.get_end_action()
 
-        if previous_action is None:
+        if observation.previous_action is None:
             face = random.randint(common.MIN_FACE_VAL, common.MAX_FACE_VAL)
             # Note: Don't want to assume that the WILD is the MIN, even though
             # that's true and always will be because I'm pedantic as crap.
-            if not is_single_die_round:
+            if not observation.is_single_die_round:
                 while face == common.WILD_FACE_VAL:
                     face = random.randint(common.MIN_FACE_VAL, common.MAX_FACE_VAL)
             min_count = 1
         else:
             face = random.randint(common.MIN_FACE_VAL, common.MAX_FACE_VAL)
-            assert isinstance(previous_action, actions.Bid)
-            min_count = previous_action.min_next_count(face)
+            assert isinstance(observation.previous_action, actions.Bid)
+            min_count = observation.previous_action.min_next_count(face)
 
-        if min_count > num_dice_in_play:
+        if min_count > observation.num_dice_in_play:
             return self.get_end_action()
 
-        count = random.randint(min_count, num_dice_in_play)
+        count = random.randint(min_count, observation.num_dice_in_play)
         return actions.Bid(face=face, count=count)
 
 
@@ -310,7 +302,7 @@ class ProbabilisticPlayer(PlayerABC):
         is_single_die_round: bool,
         num_other_dice: int,
     ) -> float:
-        if self.cur_dice[face] >= count:
+        if self.dice_counts[face] >= count:
             return 0
 
         if is_single_die_round or face == common.WILD_FACE_VAL:
@@ -318,7 +310,7 @@ class ProbabilisticPlayer(PlayerABC):
         else:
             p = 1/3
 
-        needed_from_others = count - self.cur_dice[face]
+        needed_from_others = count - self.dice_counts[face]
 
         prob = 0.0
         for k in range(0, needed_from_others):
@@ -334,7 +326,7 @@ class ProbabilisticPlayer(PlayerABC):
         num_other_dice: int,
     ) -> float:
         # How many matching dice we need from others
-        needed_from_others = count - self.cur_dice[face]
+        needed_from_others = count - self.dice_counts[face]
 
         # Edge cases
         if needed_from_others < 0:
@@ -447,34 +439,26 @@ class ProbabilisticPlayer(PlayerABC):
 
         return max(actions_values, key=lambda x: x[1])[0]
 
-    def get_action(
-        self,
-        previous_action: actions.Bid | None,
-        is_single_die_round: bool,
-        num_dice_in_play: int,
-        player_dice_count_history: list[list[int]],
-        all_rounds_actions: list[list[actions.Action]],
-        dice_reveal_history: list[list[collections.Counter[int]]],
-    ) -> actions.Action:
-        num_other_dice = num_dice_in_play - len(self.cur_dice)
+    def get_action(self, observation: ActionObservation,) -> actions.Action:
+        num_other_dice = observation.num_dice_in_play - self.dice_counts.get_num_dice()
         if num_other_dice == 0:
             return actions.InvalidAction('NO BASE', "No other players have dice")
 
-        if is_single_die_round:
+        if observation.is_single_die_round:
             non_wild_avg_count = 2*num_other_dice / common.NUM_FACES
         else:
             non_wild_avg_count = num_other_dice / common.NUM_FACES
 
-        if previous_action is None:
+        if observation.previous_action is None:
             return self._get_opening_bid(
-                is_single_die_round=is_single_die_round,
+                is_single_die_round=observation.is_single_die_round,
                 non_wild_avg_count=non_wild_avg_count,
             )
 
-        assert isinstance(previous_action, actions.Bid)
+        assert isinstance(observation.previous_action, actions.Bid)
         return self._get_expected_best_action(
-            previous_bid=previous_action,
-            is_single_die_round=is_single_die_round,
+            previous_bid=observation.previous_action,
+            is_single_die_round=observation.is_single_die_round,
             num_other_dice=num_other_dice,
-            num_players_alive=sum(count != 0 for count in player_dice_count_history[-1]),
+            num_players_alive=sum(count != 0 for count in observation.num_dice_by_player_history[-1]),
         )
