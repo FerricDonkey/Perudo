@@ -142,7 +142,7 @@ class Connection:
         return messaging.WrappedMessage.from_bytes(wrapped)
 
     async def send_obj(self, obj: common.BaseFrozen) -> None:
-        print(f"-- send {obj}")
+        print(f"-->> send {obj}")
         await self._send_wrapped_message(
             message=messaging.WrappedMessage.from_data(obj, self._self_private_key),
             writer=self._writer,
@@ -162,7 +162,7 @@ class Connection:
             error_message = f"Public key mismatch: {wrapped.public_key} != {self._target_public_key}"
             print('>>>>>', error_message)
             return messaging.Corrupted(contents=error_message)
-        print(f"-- recv {wrapped.data}")
+        print(f"<<-- recv {wrapped.data}")
         return wrapped.data
 
     async def ping(self) -> bool:

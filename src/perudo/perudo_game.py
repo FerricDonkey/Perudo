@@ -56,14 +56,6 @@ class PerudoGame:
     print_non_human_dice: bool = True
     hide_noops: bool = False
 
-    def __post_init__(self) -> None:
-        # Give the players some global information they can use.
-        for player_index, player in enumerate(self.players):
-            player.initialize(
-                index=player_index,
-                num_players=len(self.players),
-            )
-
     @property
     def current_round_actions(self) -> list[actions.Action]:
         if not self.all_rounds_actions:
@@ -326,6 +318,11 @@ class PerudoGame:
         :param game_end_callback: Function called at game end with winning player
         :return: winning player index
         """
+        for player_index, player in enumerate(self.players):
+            player.initialize(
+                index=player_index,
+                num_players=len(self.players),
+            )
         if randomize_starting_player:
             first_player_index = random.randrange(len(self.players))
         else:

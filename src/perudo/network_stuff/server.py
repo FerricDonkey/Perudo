@@ -341,7 +341,7 @@ class RemotePlayer(pl.PlayerABC):
     Has both async and sync methods, to allow for use within the game and
     for basic communication with the server.
     """
-    TIMEOUT: ty.ClassVar[int] = 10
+    DEFAULT_TIMEOUT: ty.ClassVar[int] = 10
 
     connection: nc.Connection
     asyncio_loop: asyncio.AbstractEventLoop
@@ -355,7 +355,7 @@ class RemotePlayer(pl.PlayerABC):
     async def ping(self) -> bool:
         return await self.connection.ping()
 
-    def _async_do[T](self, coroutine: ty.Coroutine[None, None, T]) -> T:
+    def _async_do[T](self, coroutine: ty.Coroutine[None, None, T], timeout: float | None = DEFAULT_TIMEOUT) -> T:
         """
         blocking call to coroutine
         """
@@ -363,13 +363,13 @@ class RemotePlayer(pl.PlayerABC):
             coroutine,
             self.asyncio_loop,
         )
-        return future.result(timeout=self.TIMEOUT)
+        return future.result(timeout=timeout)
 
-    def sync_send_obj(self, obj: common.BaseFrozen) -> None:
-        self._async_do(self.connection.send_obj(obj))
+    def sync_send_obj(self, obj: common.BaseFrozen, timeout: float | None = DEFAULT_TIMEOUT) -> None:
+        self._async_do(self.connection.send_obj(obj), timeout=timeout)
 
-    def sync_recv_obj(self) -> common.BaseFrozen:
-        return self._async_do(self.connection.receive_obj())
+    def sync_recv_obj(self, timeout: float | None = DEFAULT_TIMEOUT) -> common.BaseFrozen:
+        return self._async_do(self.connection.receive_obj(), timeout=timeout)
 
     def react_to_round_summary(self, round_summary: pg.RoundSummary) -> None:
         self.sync_send_obj(round_summary)
@@ -559,11 +559,6 @@ class GameManager:
                 await player.connection.close()
 
         self.players = self.players[:self.num_players]
-        self.game = pg.PerudoGame.from_player_list(
-            players=self.players,
-            print_while_playing=True,
-            print_non_human_dice=True,
-        )
 
         self.game_thread = threading.Thread(
             target=self._start_game,
@@ -581,7 +576,11 @@ class GameManager:
         """
         Intended to be run in a separate thread. Starts the game
         """
-        assert self.game is not None, "Game not started yet"
+        self.game = pg.PerudoGame.from_player_list(
+            players=self.players,
+            print_while_playing=True,
+            print_non_human_dice=True,
+        )
         self.game.main_loop(
             game_end_callback=self._broadcast_winner_cb,
         )
