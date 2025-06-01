@@ -83,7 +83,7 @@ def test_exact_success_no_wild() -> None:
         previous_player=4,
         other_players=[1, 2, 3, 4]
     )
-    assert losers == [1, 2, 3, 4]  # Previous player loses because bid was invalid
+    assert losers == [1, 2, 3, 4]  # All non caller players lose because bid was exact
 
 def test_exact_success_with_wild() -> None:
     previous = actions.Bid(face=2, count=2)
@@ -97,7 +97,7 @@ def test_exact_success_with_wild() -> None:
         previous_player=4,
         other_players=[1, 2, 3, 4]
     )
-    assert losers == [1, 2, 3, 4]  # Previous player loses because bid was invalid
+    assert losers == [1, 2, 3, 4]  # All non caller players lose because bid was exact
 
 def test_exact_success_disabled_wild() -> None:
     previous = actions.Bid(face=2, count=2)
@@ -111,7 +111,7 @@ def test_exact_success_disabled_wild() -> None:
         previous_player=4,
         other_players=[1, 2, 3, 4]
     )
-    assert losers == [1, 2, 3, 4]  # Previous player loses because bid was invalid
+    assert losers == [1, 2, 3, 4]  # All non caller players lose because bid was exact
 
 def test_exact_failure_no_wild() -> None:
     previous = actions.Bid(face=3, count=2)
@@ -125,7 +125,7 @@ def test_exact_failure_no_wild() -> None:
         previous_player=4,
         other_players=[1, 2, 3, 4]
     )
-    assert losers == [0]  # Previous player loses because bid was invalid
+    assert losers == [0]  # Caller loses because exact call failed
 
 def test_exact_failure_with_wild() -> None:
     previous = actions.Bid(face=3, count=2)
@@ -139,7 +139,7 @@ def test_exact_failure_with_wild() -> None:
         previous_player=4,
         other_players=[1, 2, 3, 4]
     )
-    assert losers == [0]  # Previous player loses because bid was invalid
+    assert losers == [0]  # Caller loses because exact call failed
 
 def test_exact_failure_disabled_wild() -> None:
     previous = actions.Bid(face=3, count=2)
@@ -153,7 +153,7 @@ def test_exact_failure_disabled_wild() -> None:
         previous_player=4,
         other_players=[1, 2, 3, 4]
     )
-    assert losers == [0]  # Previous player loses because bid was invalid
+    assert losers == [0]  # Caller loses because exact call failed
 
 def test_perudogame_start_new_round(simple_game: pg.PerudoGame) -> None:
     simple_game.start_new_round(first_player_index=0, single_die_round=False)
